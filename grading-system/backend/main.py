@@ -408,7 +408,7 @@ def get_scored_pdf(session_id: str):
         for q_str, bbox in bboxes.items():
             r     = results.get(str(q_str), {})
             judge = r.get("judge", "")
-            if judge not in ("correct", "wrong"):
+            if judge not in ("correct", "wrong", "blank", "review"):
                 continue
 
             x0 = int(bbox[0] * sx)
@@ -417,7 +417,7 @@ def get_scored_pdf(session_id: str):
             y1 = int(bbox[3] * sy)
 
             cell_h = max(y1 - y0, 1)
-            mark_s = max(int(cell_h * 0.75), 14)
+            mark_s = max(int(cell_h * 0.38), 8)
             lw     = max(2, mark_s // 10)
             gap    = max(4, int(cell_h * 0.1))
 
