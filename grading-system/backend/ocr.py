@@ -33,6 +33,7 @@ def run_yomitoku(
     lite: bool = True,
     device: str = "cpu",
     combine: bool = True,
+    viz: bool = False,
 ) -> list[dict]:
     """
     yomitoku CLI を subprocess で実行し、出力 JSON をパースして返す。
@@ -48,6 +49,8 @@ def run_yomitoku(
         cmd.append("-l")
     if combine:
         cmd.append("--combine")
+    if viz:
+        cmd.append("-v")
 
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:

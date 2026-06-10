@@ -76,6 +76,14 @@ def get_answer_key():
     return JSONResponse(data)
 
 
+@app.get("/api/answer-key/image")
+def get_answer_key_image():
+    img_path = _ROOT / "data" / "answer_key_page.jpg"
+    if not img_path.exists():
+        raise HTTPException(status_code=404, detail="プレビュー画像がありません。正解 PDF を再登録してください。")
+    return FileResponse(str(img_path), media_type="image/jpeg")
+
+
 @app.patch("/api/answer-key/cell")
 async def patch_answer_key_cell(body: dict):
     data = load_answer_key()

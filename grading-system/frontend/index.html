@@ -71,6 +71,17 @@
     .answer-cell .qno { font-size: 10px; color: #999; }
     .answer-cell select { width: 100%; border: none; background: transparent; font-size: 13px; text-align: center; cursor: pointer; }
 
+    /* ─── 解答用紙プレビュー ───────────────────────── */
+    .page-preview-wrap {
+      overflow: auto; max-height: 75vh;
+      border: 1px solid #ddd; border-radius: 6px; background: #fafafa;
+    }
+    .page-preview-inner { position: relative; display: inline-block; min-width: 100%; }
+    .page-preview-inner img { display: block; width: 100%; }
+    .page-preview-inner svg {
+      position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none;
+    }
+
     /* ─── 採点グリッド（Phase 3）─────────────────── */
     #tab-review .card { overflow: hidden; }
     .grid-toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
@@ -163,6 +174,21 @@
     <br>
     <button class="btn btn-success" onclick="saveAkEdits()">修正を保存</button>
     <div id="editStatus"></div>
+  </div>
+  <!-- 解答用紙プレビュー -->
+  <div class="card" id="pagePreviewCard" style="display:none">
+    <h2>解答用紙プレビュー</h2>
+    <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:center;margin-bottom:10px;font-size:12px">
+      <span><span style="display:inline-block;width:14px;height:14px;background:#27ae6644;border:2px solid #27ae60;vertical-align:middle;margin-right:4px;border-radius:2px"></span>自動読取</span>
+      <span><span style="display:inline-block;width:14px;height:14px;background:#e67e2244;border:2px solid #e67e22;vertical-align:middle;margin-right:4px;border-radius:2px"></span>要確認</span>
+      <span><span style="display:inline-block;width:14px;height:14px;background:#e74c3c44;border:2px solid #e74c3c;vertical-align:middle;margin-right:4px;border-radius:2px"></span>未入力</span>
+    </div>
+    <div class="page-preview-wrap">
+      <div class="page-preview-inner" id="pagePreviewInner">
+        <img id="pagePreviewImg" src="" alt="解答用紙">
+        <svg id="pagePreviewSvg"></svg>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -299,7 +325,10 @@ async function renderAkGrid() {
       opt.value = val; opt.textContent = `${val}?`; opt.selected = true;
       sel.appendChild(opt);
     }
-    sel.addEventListener('change', () => div.classList.remove('review'));
+    sel.addEventListener('change', () => {
+      div.classList.remove('review');
+      updateOverlayCell(q, sel.value, false);
+    });
     div.appendChild(sel);
     grid.appendChild(div);
   });
@@ -309,6 +338,91 @@ async function renderAkGrid() {
   document.getElementById('akStudentNo').textContent =
     `出席番号: method=${sno.method} / bbox=[${(sno.bbox_norm||[]).join(', ')}] / digits=${sno.digits}`;
   document.getElementById('akResultCard').style.display = 'block';
+  renderPageOverlay(ak);
+}
+
+// ─── 解答用紙プレビュー ───────────────────────────────────────────────────
+function _overlayColor(val, isReview) {
+  if (!val)     return '#e74c3c';  // 未入力 → 赤
+  if (isReview) return '#e67e22';  // 要確認 → 橙
+  return '#27ae60';                // 自動読取 → 緑
+}
+
+function renderPageOverlay(ak) {
+  const bboxes  = ak.answer_cell_bboxes;
+  const size    = ak.page_image_size;
+  if (!bboxes || !size) return;
+
+  const card = document.getElementById('pagePreviewCard');
+  const img  = document.getElementById('pagePreviewImg');
+  const svg  = document.getElementById('pagePreviewSvg');
+
+  img.src = `/api/answer-key/image?t=${Date.now()}`;
+  card.style.display = 'block';
+
+  svg.setAttribute('viewBox', `0 0 ${size.w} ${size.h}`);
+  svg.innerHTML = '';
+
+  const review  = ak.review  || {};
+  const answers = ak.answers || {};
+
+  Object.entries(bboxes).sort((a,b) => +a[0] - +b[0]).forEach(([q, bbox]) => {
+    const [x0, y0, x1, y1] = bbox;
+    const val   = answers[q] || '';
+    const color = _overlayColor(val, review[q]);
+    const cx = (x0 + x1) / 2;
+    const cy = (y0 + y1) / 2;
+    const bh = y1 - y0;
+    const fontSize = Math.max(10, Math.min(bh * 0.55, 28));
+    const labelSize = Math.max(8, fontSize * 0.5);
+
+    const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    g.id = `ovl-q${q}`;
+
+    const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    rect.setAttribute('x', x0); rect.setAttribute('y', y0);
+    rect.setAttribute('width', x1 - x0); rect.setAttribute('height', y1 - y0);
+    rect.setAttribute('fill', color + '33');
+    rect.setAttribute('stroke', color);
+    rect.setAttribute('stroke-width', '2');
+    rect.setAttribute('rx', '2');
+    g.appendChild(rect);
+
+    // Q ラベル（セル上部）
+    const tq = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    tq.setAttribute('x', cx); tq.setAttribute('y', y0 + labelSize);
+    tq.setAttribute('text-anchor', 'middle');
+    tq.setAttribute('font-size', labelSize);
+    tq.setAttribute('fill', color);
+    tq.setAttribute('font-family', 'sans-serif');
+    tq.textContent = `Q${q}`;
+    g.appendChild(tq);
+
+    // 解答値（セル中央）
+    const tv = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    tv.id = `ovl-val-q${q}`;
+    tv.setAttribute('x', cx); tv.setAttribute('y', cy + fontSize * 0.38);
+    tv.setAttribute('text-anchor', 'middle');
+    tv.setAttribute('font-size', fontSize);
+    tv.setAttribute('font-weight', 'bold');
+    tv.setAttribute('fill', color);
+    tv.setAttribute('font-family', 'sans-serif');
+    tv.textContent = val || '?';
+    g.appendChild(tv);
+
+    svg.appendChild(g);
+  });
+}
+
+function updateOverlayCell(q, val, isReview) {
+  const g    = document.getElementById(`ovl-q${q}`);
+  const tv   = document.getElementById(`ovl-val-q${q}`);
+  if (!g || !tv) return;
+  const color = _overlayColor(val, isReview);
+  const rect  = g.querySelector('rect');
+  if (rect) { rect.setAttribute('fill', color + '33'); rect.setAttribute('stroke', color); }
+  g.querySelectorAll('text').forEach(t => t.setAttribute('fill', color));
+  tv.textContent = val || '?';
 }
 
 async function saveAkEdits() {

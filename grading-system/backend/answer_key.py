@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -16,6 +17,7 @@ from .grading import (
 _ROOT = Path(__file__).parent.parent
 _CONFIG_PATH = _ROOT / "backend" / "config.json"
 _DATA_PATH = _ROOT / "data" / "answer_key.json"
+_PAGE_IMAGE_PATH = _ROOT / "data" / "answer_key_page.jpg"
 
 
 def _load_config() -> dict:
@@ -123,7 +125,7 @@ def build_answer_key(
     correction_map = cfg.get("ocr_correction_map", {})
     digits = cfg.get("student_no", {}).get("digits", 2)
 
-    pages = run_yomitoku(pdf_path, tmp_dir, lite=True, device="cpu", combine=True)
+    pages = run_yomitoku(pdf_path, tmp_dir, lite=True, device="cpu", combine=True, viz=True)
     all_tables = parse_tables(pages)
 
     if not all_tables:
@@ -144,6 +146,7 @@ def build_answer_key(
 
     answers: dict[str, str] = {}
     review_flags: dict[str, bool] = {}
+    answer_cell_bboxes: dict[str, list] = {}
 
     qno_cols = _detect_qno_columns(cells_all)
 
@@ -156,21 +159,35 @@ def build_answer_key(
         ans_cell = cell_map.get((cell.row + dr, cell.col + dc))
         if ans_cell is None:
             continue
+        answer_cell_bboxes[str(qno)] = ans_cell.bbox
         raw_text = ans_cell.text
         value, status = normalize_choice(raw_text, valid_choices, correction_map)
         if value:
             answers[str(qno)] = value
             review_flags[str(qno)] = (status != "ok")
         else:
-            # 正規化できない値は空欄として review フラグを立てる
             answers[str(qno)] = ""
             review_flags[str(qno)] = True
 
     num_questions = len(answers)
 
-    # ページサイズヒント（OCR 出力画像サイズ近似）
-    page_size_hint = {"w": page_w, "h": page_h}
+    # ページ画像を保存し実サイズを取得
+    tmp_dir_path = Path(tmp_dir)
+    layout_imgs = sorted(tmp_dir_path.glob("*layout*.jpg"))
+    if not layout_imgs:
+        layout_imgs = sorted(tmp_dir_path.glob("*.jpg"))
+    page_image_size = {"w": page_w, "h": page_h}
+    if layout_imgs:
+        _PAGE_IMAGE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy(layout_imgs[0], _PAGE_IMAGE_PATH)
+        try:
+            from PIL import Image as _PILImage
+            with _PILImage.open(_PAGE_IMAGE_PATH) as _img:
+                page_image_size = {"w": _img.width, "h": _img.height}
+        except Exception:
+            pass
 
+    page_size_hint = {"w": page_w, "h": page_h}
     student_no_template = detect_student_no_region(pages, page_w, page_h, digits)
 
     answer_key = {
@@ -188,6 +205,8 @@ def build_answer_key(
         },
         "answers": answers,
         "review": review_flags,
+        "answer_cell_bboxes": answer_cell_bboxes,
+        "page_image_size": page_image_size,
     }
     return answer_key
 
