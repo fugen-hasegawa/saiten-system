@@ -114,6 +114,7 @@ def run_yomitoku(
     out_dir: str | Path | None = None,  # 後方互換（使用しない）
     device: str = "cpu",
     save_first_page_to: str | Path | None = None,
+    save_pages_to_dir: str | Path | None = None,
     # 後方互換パラメータ（無視）
     lite: bool = False,
     combine: bool = True,
@@ -127,6 +128,7 @@ def run_yomitoku(
     Args:
         input_path: PDF または画像ファイルパス
         save_first_page_to: 最初のページ画像を JPEG 保存するパス（answer_key preview 用）
+        save_pages_to_dir: 全ページを page_0.jpg ... として保存するディレクトリ
     Returns:
         list of page dicts: [{tables, words, paragraphs}, ...]
     """
@@ -144,9 +146,11 @@ def run_yomitoku(
     def _process():
         nonlocal first
         analyzer = _get_analyzer(device)
-        for page_img in pages_iter:
+        for idx, page_img in enumerate(pages_iter):
             if first and save_first_page_to:
                 save_page_image(page_img, save_first_page_to)
+            if save_pages_to_dir:
+                save_page_image(page_img, Path(save_pages_to_dir) / f"page_{idx}.jpg")
             first = False
             enhanced = _enhance_for_ocr(page_img)
             schema, _, _ = analyzer(enhanced)

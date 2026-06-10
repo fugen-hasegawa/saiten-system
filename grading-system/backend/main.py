@@ -138,11 +138,15 @@ async def post_grade(file: UploadFile = File(...)):
     suffix = Path(file.filename or "upload").suffix or ".pdf"
     tmp_pdf = _UPLOADS / f"{uuid.uuid4().hex}{suffix}"
 
+    session_id = uuid.uuid4().hex
+    session_imgs_dir = _SESSIONS / f"{session_id}_imgs"
+
     try:
         tmp_pdf.write_bytes(await file.read())
 
         from .ocr import run_yomitoku
-        pages = run_yomitoku(tmp_pdf, device="cpu")
+        session_imgs_dir.mkdir(parents=True, exist_ok=True)
+        pages = run_yomitoku(tmp_pdf, device="cpu", save_pages_to_dir=session_imgs_dir)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"OCR エラー: {e}")
     finally:
@@ -176,7 +180,6 @@ async def post_grade(file: UploadFile = File(...)):
             "max_score": max_score,
         })
 
-    session_id = uuid.uuid4().hex
     session = {
         "session_id": session_id,
         "created_at": datetime.now(timezone.utc).isoformat(),
@@ -207,6 +210,14 @@ def _save_session(session: dict) -> None:
 @app.get("/api/session/{session_id}")
 def get_session(session_id: str):
     return JSONResponse(_load_session(session_id))
+
+
+@app.get("/api/session/{session_id}/page/{page_index}")
+def get_session_page(session_id: str, page_index: int):
+    img_path = _SESSIONS / f"{session_id}_imgs" / f"page_{page_index}.jpg"
+    if not img_path.exists():
+        raise HTTPException(status_code=404, detail="ページ画像がありません。")
+    return FileResponse(str(img_path), media_type="image/jpeg")
 
 
 @app.patch("/api/session/{session_id}/cell")

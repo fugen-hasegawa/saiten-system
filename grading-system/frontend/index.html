@@ -71,7 +71,7 @@
     .answer-cell .qno { font-size: 10px; color: #999; }
     .answer-cell select { width: 100%; border: none; background: transparent; font-size: 13px; text-align: center; cursor: pointer; }
 
-    /* ─── 解答用紙プレビュー ───────────────────────── */
+    /* ─── 解答用紙プレビュー（共通）─────────────── */
     .page-preview-wrap {
       overflow: auto; max-height: 75vh;
       border: 1px solid #ddd; border-radius: 6px; background: #fafafa;
@@ -81,6 +81,8 @@
     .page-preview-inner svg {
       position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none;
     }
+    /* Tab② のオーバーレイは pointer-events: all で上書き */
+    #gradePreviewInner svg { pointer-events: all; }
 
     /* ─── 採点グリッド（Phase 3）─────────────────── */
     #tab-review .card { overflow: hidden; }
@@ -141,6 +143,37 @@
       background: #1a5276; color: #fff; text-align: center; padding: 10px;
       border-radius: 6px; font-weight: bold; margin-bottom: 12px; font-size: 14px;
     }
+
+    /* ─── 採点ページナビ（Tab②）───────────────── */
+    .grade-nav-bar {
+      display: flex; align-items: center; gap: 8px; margin-bottom: 12px; flex-wrap: wrap;
+    }
+    .grade-nav-btn {
+      background: #3498db; color: #fff; border: none; border-radius: 6px;
+      padding: 5px 16px; font-size: 20px; cursor: pointer; line-height: 1.2;
+    }
+    .grade-nav-btn:disabled { background: #bdc3c7; cursor: default; }
+    .grade-page-counter { font-size: 14px; color: #555; min-width: 55px; text-align: center; }
+    .grade-student-bar {
+      flex: 1; min-width: 200px; font-size: 13px; color: #2c3e50;
+      background: #eaf4fb; border-radius: 6px; padding: 7px 14px;
+    }
+    .sno-edit { cursor: pointer; text-decoration: underline dotted; color: #2980b9; }
+    .sno-edit:hover { color: #1a5276; }
+
+    /* ─── オーバーレイ編集ポップアップ ──────────── */
+    #gradeOverlayEditor {
+      display: none; position: fixed; z-index: 9999;
+      background: #fff; border: 1px solid #aaa; border-radius: 8px;
+      padding: 10px 14px; box-shadow: 0 4px 16px rgba(0,0,0,.25);
+    }
+    #gradeOverlayEditor .oe-label {
+      font-size: 12px; color: #777; margin-bottom: 6px;
+    }
+    #gradeOverlayEditor select {
+      font-size: 16px; padding: 4px 8px; border: 1px solid #ccc;
+      border-radius: 4px; width: 100%;
+    }
   </style>
 </head>
 <body>
@@ -148,7 +181,7 @@
 <div class="tabs">
   <button class="tab-btn active" data-tab="tab-answer-key" onclick="showTab(this)">① 正解登録</button>
   <button class="tab-btn"        data-tab="tab-grade"      onclick="showTab(this)">② 採点</button>
-  <button class="tab-btn"        data-tab="tab-review"     onclick="showTab(this)">③ 確認・修正</button>
+  <button class="tab-btn"        data-tab="tab-review"     onclick="showTab(this)">③ 一覧・修正</button>
   <button class="tab-btn"        data-tab="tab-export"     onclick="showTab(this)">④ 出力</button>
 </div>
 
@@ -194,7 +227,8 @@
 
 <!-- ② 採点 -->
 <div id="tab-grade" class="tab-pane">
-  <div class="card">
+  <!-- アップロードカード -->
+  <div class="card" id="gradeUploadCard">
     <h2>生徒答案をアップロード</h2>
     <div class="upload-area">
       <p>生徒答案 PDF（1人1ページ）をアップロードしてください。</p>
@@ -208,15 +242,39 @@
         <button class="btn btn-primary" id="gradeBtn" onclick="startGrading()">採点開始</button>
       </div>
     </div>
-    <div class="loader" id="gradeLoader"><span class="spinner"></span>OCR & 採点処理中…</div>
+    <div class="loader" id="gradeLoader"><span class="spinner"></span>OCR &amp; 採点処理中…</div>
     <div id="gradeStatus"></div>
+  </div>
+
+  <!-- 1ページビュー（採点後に表示） -->
+  <div class="card" id="gradePageCard" style="display:none">
+    <div class="grade-nav-bar">
+      <button class="grade-nav-btn" id="gradePrevBtn" onclick="gradeNav(-1)" disabled>&#8592;</button>
+      <span class="grade-page-counter" id="gradePageCounter">1 / 1</span>
+      <button class="grade-nav-btn" id="gradeNextBtn" onclick="gradeNav(1)" disabled>&#8594;</button>
+      <div class="grade-student-bar" id="gradeStudentBar"></div>
+    </div>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-bottom:8px;font-size:12px">
+      <span><span style="display:inline-block;width:14px;height:14px;background:#d5f5e344;border:2px solid #27ae60;vertical-align:middle;margin-right:4px;border-radius:2px"></span>正解</span>
+      <span><span style="display:inline-block;width:14px;height:14px;background:#fadbd844;border:2px solid #e74c3c;vertical-align:middle;margin-right:4px;border-radius:2px"></span>不正解</span>
+      <span><span style="display:inline-block;width:14px;height:14px;background:#f2f3f4;border:2px solid #95a5a6;vertical-align:middle;margin-right:4px;border-radius:2px"></span>無答</span>
+      <span><span style="display:inline-block;width:14px;height:14px;background:#fef9e744;border:2px solid #e67e22;vertical-align:middle;margin-right:4px;border-radius:2px"></span>要確認</span>
+      <span style="color:#aaa;margin-left:6px;">セルをクリックで修正</span>
+    </div>
+    <div class="page-preview-wrap">
+      <div class="page-preview-inner" id="gradePreviewInner">
+        <img id="gradePageImg" alt="答案用紙">
+        <svg id="gradePageSvg"></svg>
+      </div>
+    </div>
+    <div id="gradePageStatus" style="margin-top:8px"></div>
   </div>
 </div>
 
-<!-- ③ 確認・修正 -->
+<!-- ③ 一覧・修正 -->
 <div id="tab-review" class="tab-pane">
   <div class="card">
-    <h2>採点結果 — 確認・修正</h2>
+    <h2>採点結果 — 一覧・修正</h2>
     <div id="confirmedBanner" style="display:none" class="confirmed-banner">✓ このセッションは確定済みです</div>
     <div class="grid-toolbar">
       <div class="legend">
@@ -255,11 +313,23 @@
   </div>
 </div>
 
+<!-- オーバーレイ編集ポップアップ（Tab② 採点用） -->
+<div id="gradeOverlayEditor">
+  <div class="oe-label" id="gradeOverlayQLabel"></div>
+  <select id="gradeOverlaySelect"></select>
+</div>
+
 <script>
 // ─── グローバル状態 ────────────────────────────────────────────────────────
 let currentSessionId = localStorage.getItem('sessionId') || null;
 let currentSession   = null;
 const VALID_CHOICES  = ['ア','イ','ウ','エ'];
+
+// Tab② 状態
+let gradeCurrentPage = 0;
+let gradeAk          = null;   // answer key（overlay用）
+let _gradeOverlayStudent = null;
+let _gradeOverlayQ       = null;
 
 // ─── タブ切替 ──────────────────────────────────────────────────────────────
 function showTab(btn) {
@@ -289,6 +359,7 @@ async function uploadAnswerKey() {
     if (!res.ok) throw new Error(data.detail || res.statusText);
     setStatus(document.getElementById('akStatus'),
       `✓ 登録完了：${data.num_questions} 問、要確認 ${data.review_count} セル`, 'success');
+    gradeAk = null; // answer key が更新されたのでキャッシュをクリア
     await renderAkGrid();
   } catch(e) {
     setStatus(document.getElementById('akStatus'), `エラー: ${e.message}`, 'error');
@@ -302,6 +373,7 @@ async function renderAkGrid() {
   const res = await fetch('/api/answer-key');
   if (!res.ok) return;
   const ak = await res.json();
+  gradeAk = ak; // キャッシュ更新
   const review = ak.review || {};
   const rc = Object.values(review).filter(Boolean).length;
   const grid = document.getElementById('answerGrid');
@@ -341,11 +413,11 @@ async function renderAkGrid() {
   renderPageOverlay(ak);
 }
 
-// ─── 解答用紙プレビュー ───────────────────────────────────────────────────
+// ─── 解答用紙プレビュー（Tab①）─────────────────────────────────────────
 function _overlayColor(val, isReview) {
-  if (!val)     return '#e74c3c';  // 未入力 → 赤
-  if (isReview) return '#e67e22';  // 要確認 → 橙
-  return '#27ae60';                // 自動読取 → 緑
+  if (!val)     return '#e74c3c';
+  if (isReview) return '#e67e22';
+  return '#27ae60';
 }
 
 function renderPageOverlay(ak) {
@@ -388,7 +460,6 @@ function renderPageOverlay(ak) {
     rect.setAttribute('rx', '2');
     g.appendChild(rect);
 
-    // Q ラベル（セル上部）
     const tq = document.createElementNS('http://www.w3.org/2000/svg', 'text');
     tq.setAttribute('x', cx); tq.setAttribute('y', y0 + labelSize);
     tq.setAttribute('text-anchor', 'middle');
@@ -398,7 +469,6 @@ function renderPageOverlay(ak) {
     tq.textContent = `Q${q}`;
     g.appendChild(tq);
 
-    // 解答値（セル中央）
     const tv = document.createElementNS('http://www.w3.org/2000/svg', 'text');
     tv.id = `ovl-val-q${q}`;
     tv.setAttribute('x', cx); tv.setAttribute('y', cy + fontSize * 0.38);
@@ -440,6 +510,7 @@ async function saveAkEdits() {
     ? `${errors} 件の保存に失敗しました。`
     : `${selects.length} 問を保存しました。`;
   setStatus(document.getElementById('editStatus'), msg, errors ? 'error' : 'success');
+  gradeAk = null; // answer key 更新後はキャッシュクリア
 }
 
 // ─── Phase 2: 採点 ────────────────────────────────────────────────────────
@@ -451,6 +522,7 @@ async function startGrading() {
   btn.disabled = true;
   document.getElementById('gradeLoader').classList.add('active');
   document.getElementById('gradeStatus').innerHTML = '';
+  document.getElementById('gradePageCard').style.display = 'none';
   try {
     if (rosterFile) {
       const fd = new FormData(); fd.append('file', rosterFile);
@@ -464,17 +536,295 @@ async function startGrading() {
     currentSession   = data;
     localStorage.setItem('sessionId', currentSessionId);
     setStatus(document.getElementById('gradeStatus'),
-      `✓ 採点完了: ${data.students.length} 人分 → 確認・修正タブへ`, 'success');
-    // ③ タブへ切替
-    const btn3 = document.querySelector('.tab-btn[data-tab="tab-review"]');
-    showTab(btn3);
+      `✓ 採点完了: ${data.students.length} 人分`, 'success');
     renderGrid(data);
+    // 最初のページを表示
+    const firstPage = getPagesSorted(data)[0] ?? 0;
+    await renderGradePageView(data, firstPage);
   } catch(e) {
     setStatus(document.getElementById('gradeStatus'), `エラー: ${e.message}`, 'error');
   } finally {
     btn.disabled = false;
     document.getElementById('gradeLoader').classList.remove('active');
   }
+}
+
+// ─── Tab② ページビュー ───────────────────────────────────────────────────
+function getPagesSorted(session) {
+  return (session.students || [])
+    .map(s => s.page_index)
+    .sort((a, b) => a - b);
+}
+
+function judgeColor(judge) {
+  return { correct: '#27ae60', wrong: '#e74c3c', blank: '#95a5a6', review: '#e67e22' }[judge] || '#e67e22';
+}
+
+async function renderGradePageView(session, pageIndex) {
+  // answer key をロード（キャッシュ済みなら再利用）
+  if (!gradeAk) {
+    const r = await fetch('/api/answer-key');
+    if (r.ok) gradeAk = await r.json();
+  }
+
+  const pages = getPagesSorted(session);
+  const pos   = pages.indexOf(pageIndex);
+  const student = (session.students || []).find(s => s.page_index === pageIndex);
+  if (!student) return;
+
+  gradeCurrentPage = pageIndex;
+
+  // ナビゲーション更新
+  document.getElementById('gradePageCounter').textContent = `${pos + 1} / ${pages.length}`;
+  document.getElementById('gradePrevBtn').disabled = pos <= 0;
+  document.getElementById('gradeNextBtn').disabled = pos >= pages.length - 1;
+
+  // 生徒情報バー
+  _renderStudentBar(student);
+
+  // 答案画像読み込み
+  document.getElementById('gradePageImg').src =
+    `/api/session/${currentSessionId}/page/${pageIndex}?t=${Date.now()}`;
+
+  // SVG オーバーレイ描画
+  renderStudentOverlay(student);
+
+  document.getElementById('gradePageCard').style.display = 'block';
+}
+
+function _renderStudentBar(student) {
+  const snoReview = student.student_no_status === 'review';
+  const snoText   = student.student_no || '—';
+  document.getElementById('gradeStudentBar').innerHTML =
+    `出席番号: <span class="sno-edit" onclick="editGradeStudentNo(${student.page_index})" ` +
+    `title="クリックで編集" style="${snoReview ? 'color:#c0392b' : ''}">${snoText}</span>` +
+    `　氏名: ${student.name || '—'}` +
+    `　得点: <strong id="gradeScore-${student.page_index}">${student.score}/${student.max_score}</strong>`;
+}
+
+function gradeNav(delta) {
+  const pages = getPagesSorted(currentSession);
+  const pos   = pages.indexOf(gradeCurrentPage);
+  const next  = pos + delta;
+  if (next >= 0 && next < pages.length) {
+    renderGradePageView(currentSession, pages[next]);
+  }
+}
+
+// ─── 答案オーバーレイ描画（Tab②）────────────────────────────────────────
+function renderStudentOverlay(student) {
+  const svg = document.getElementById('gradePageSvg');
+  svg.innerHTML = '';
+  if (!gradeAk?.answer_cell_bboxes || !gradeAk?.page_image_size) return;
+
+  const bboxes  = gradeAk.answer_cell_bboxes;
+  const size    = gradeAk.page_image_size;
+  const results = student.results || {};
+
+  svg.setAttribute('viewBox', `0 0 ${size.w} ${size.h}`);
+
+  Object.entries(bboxes).sort((a, b) => +a[0] - +b[0]).forEach(([q, bbox]) => {
+    const [x0, y0, x1, y1] = bbox;
+    const r      = results[q] || {};
+    const color  = judgeColor(r.judge || 'review');
+    const val    = r.read || '';
+    const cx     = (x0 + x1) / 2;
+    const cy     = (y0 + y1) / 2;
+    const bh     = y1 - y0;
+    const fontSize  = Math.max(10, Math.min(bh * 0.55, 28));
+    const labelSize = Math.max(8, fontSize * 0.5);
+
+    const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    g.id = `gov-q${q}`;
+    g.style.cursor = 'pointer';
+    g.addEventListener('click', e => openGradeOverlayEditor(student, q, e));
+
+    const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    rect.setAttribute('x', x0); rect.setAttribute('y', y0);
+    rect.setAttribute('width', x1 - x0); rect.setAttribute('height', y1 - y0);
+    rect.setAttribute('fill', color + '44');
+    rect.setAttribute('stroke', color);
+    rect.setAttribute('stroke-width', '2');
+    rect.setAttribute('rx', '2');
+    g.appendChild(rect);
+
+    const tq = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    tq.setAttribute('x', cx); tq.setAttribute('y', y0 + labelSize);
+    tq.setAttribute('text-anchor', 'middle');
+    tq.setAttribute('font-size', labelSize);
+    tq.setAttribute('fill', color);
+    tq.setAttribute('font-family', 'sans-serif');
+    tq.textContent = `Q${q}`;
+    g.appendChild(tq);
+
+    const tv = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    tv.id = `gov-val-q${q}`;
+    tv.setAttribute('x', cx); tv.setAttribute('y', cy + fontSize * 0.38);
+    tv.setAttribute('text-anchor', 'middle');
+    tv.setAttribute('font-size', fontSize);
+    tv.setAttribute('font-weight', 'bold');
+    tv.setAttribute('fill', color);
+    tv.setAttribute('font-family', 'sans-serif');
+    tv.textContent = val;
+    g.appendChild(tv);
+
+    svg.appendChild(g);
+  });
+}
+
+function _updateStudentOverlayCell(q, result) {
+  const g  = document.getElementById(`gov-q${q}`);
+  const tv = document.getElementById(`gov-val-q${q}`);
+  if (!g || !tv) return;
+  const color = judgeColor(result.judge || 'review');
+  const rect  = g.querySelector('rect');
+  if (rect) { rect.setAttribute('fill', color + '44'); rect.setAttribute('stroke', color); }
+  g.querySelectorAll('text').forEach(t => t.setAttribute('fill', color));
+  tv.textContent = result.read || '';
+}
+
+// ─── オーバーレイ編集ポップアップ ─────────────────────────────────────────
+function openGradeOverlayEditor(student, q, event) {
+  event.stopPropagation();
+  _gradeOverlayStudent = student;
+  _gradeOverlayQ       = q;
+
+  const editor = document.getElementById('gradeOverlayEditor');
+  const sel    = document.getElementById('gradeOverlaySelect');
+  document.getElementById('gradeOverlayQLabel').textContent = `問 ${q} を修正`;
+
+  const currentVal = (student.results[q] || {}).read || '';
+  sel.innerHTML = '';
+  ['', ...VALID_CHOICES].forEach(ch => {
+    const opt = document.createElement('option');
+    opt.value = ch; opt.textContent = ch || '（空）';
+    if (ch === currentVal) opt.selected = true;
+    sel.appendChild(opt);
+  });
+
+  // ポップアップ位置（クリック位置の近く、画面端にかからないよう調整）
+  const W = window.innerWidth, H = window.innerHeight;
+  let left = event.clientX + 8;
+  let top  = event.clientY + 8;
+  if (left + 150 > W) left = event.clientX - 158;
+  if (top  + 90  > H) top  = event.clientY - 98;
+  editor.style.left = left + 'px';
+  editor.style.top  = top  + 'px';
+  editor.style.display = 'block';
+
+  sel.focus();
+  sel.onchange = () => applyGradeOverlayEdit();
+
+  // 外側クリックで閉じる
+  setTimeout(() => {
+    document.addEventListener('click', _closeGradeEditorOnClickOutside, { once: true });
+  }, 0);
+}
+
+function _closeGradeEditorOnClickOutside(e) {
+  const editor = document.getElementById('gradeOverlayEditor');
+  if (!editor.contains(e.target)) editor.style.display = 'none';
+}
+
+async function applyGradeOverlayEdit() {
+  const editor = document.getElementById('gradeOverlayEditor');
+  const val    = document.getElementById('gradeOverlaySelect').value;
+  editor.style.display = 'none';
+
+  const student = _gradeOverlayStudent;
+  const q       = _gradeOverlayQ;
+  if (!student || !q) return;
+
+  try {
+    const res = await fetch(`/api/session/${currentSessionId}/cell`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ page_index: student.page_index, q, value: val }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail);
+
+    student.results[q] = data.result;
+    student.score     = data.score;
+    student.max_score = data.max_score;
+
+    // オーバーレイ更新
+    _updateStudentOverlayCell(q, data.result);
+
+    // 得点バー更新
+    const scoreEl = document.getElementById(`gradeScore-${student.page_index}`);
+    if (scoreEl) scoreEl.textContent = `${data.score}/${data.max_score}`;
+
+    // Tab③ グリッドも同期
+    _syncGridCell(student, q, data);
+
+  } catch(e) {
+    setStatus(document.getElementById('gradePageStatus'), `エラー: ${e.message}`, 'error');
+  }
+}
+
+function _syncGridCell(student, q, data) {
+  const tr = document.querySelector(`#gradeGrid tr[data-page-index="${student.page_index}"]`);
+  if (!tr) return;
+  const td = tr.querySelector(`td[data-q="${q}"]`);
+  if (td) {
+    td.className = `judge-${data.result.judge}`;
+    const span = td.querySelector('.answer-cell-inner');
+    if (span) span.textContent = data.result.read || '';
+  }
+  const scoreTd = document.getElementById(`score-${student.page_index}`);
+  if (scoreTd) scoreTd.textContent = `${data.score}/${data.max_score}`;
+}
+
+// ─── 出席番号編集（Tab② バー内）──────────────────────────────────────────
+function editGradeStudentNo(pageIndex) {
+  const student = (currentSession?.students || []).find(s => s.page_index === pageIndex);
+  if (!student) return;
+
+  const bar     = document.getElementById('gradeStudentBar');
+  const snoSpan = bar.querySelector('.sno-edit');
+  if (!snoSpan || snoSpan.querySelector('input')) return;
+
+  const original = student.student_no || '';
+  const inp = document.createElement('input');
+  inp.type = 'text'; inp.value = original;
+  inp.style.cssText = 'width:54px;font-size:13px;border:1px solid #aaa;padding:2px 4px;border-radius:3px;';
+  snoSpan.textContent = '';
+  snoSpan.appendChild(inp);
+  inp.focus(); inp.select();
+
+  const apply = async () => {
+    const val = inp.value.trim();
+    try {
+      const res = await fetch(`/api/session/${currentSessionId}/student-no`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ page_index: pageIndex, value: val }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail);
+      student.student_no = val;
+      student.student_no_status = val ? 'ok' : 'review';
+      student.name = data.name || '';
+      _renderStudentBar(student);
+      // Tab③ 同期
+      const tr = document.querySelector(`#gradeGrid tr[data-page-index="${pageIndex}"]`);
+      if (tr) {
+        const snoTd = tr.querySelector('.col-sno');
+        if (snoTd) { snoTd.textContent = val || '—'; snoTd.className = 'col-sno' + (val ? '' : ' sno-review'); }
+        const nameTd = document.getElementById(`name-${pageIndex}`);
+        if (nameTd) nameTd.textContent = data.name || '—';
+      }
+    } catch(e) {
+      inp.remove(); snoSpan.textContent = original || '—';
+      setStatus(document.getElementById('gradePageStatus'), `エラー: ${e.message}`, 'error');
+    }
+  };
+  inp.addEventListener('blur', apply);
+  inp.addEventListener('keydown', e => {
+    if (e.key === 'Enter')  inp.blur();
+    if (e.key === 'Escape') { inp.remove(); snoSpan.textContent = original || '—'; }
+  });
 }
 
 // ─── Phase 3: 確認・修正グリッド ─────────────────────────────────────────
@@ -485,7 +835,6 @@ function renderGrid(data) {
 
   const qnos = Object.keys(students[0].results || {}).sort((a,b) => +a - +b);
 
-  // 統計
   let totalReview = 0, totalBlank = 0, totalCorrect = 0;
   students.forEach(s => {
     Object.values(s.results).forEach(r => {
@@ -499,14 +848,12 @@ function renderGrid(data) {
     `/ 要確認 <span style="color:#7d6608">${totalReview}</span> セル ` +
     `/ 無答 <span style="color:#888">${totalBlank}</span> セル`;
 
-  // 確定バナー
   document.getElementById('confirmedBanner').style.display = data.confirmed ? 'block' : 'none';
   document.getElementById('confirmBtn').disabled = !!data.confirmed;
 
   const table = document.getElementById('gradeGrid');
   table.innerHTML = '';
 
-  // ── ヘッダー
   const thead = document.createElement('thead');
   const hr = document.createElement('tr');
   addTh(hr, '出席番号');
@@ -515,7 +862,6 @@ function renderGrid(data) {
   addTh(hr, '合計');
   thead.appendChild(hr); table.appendChild(thead);
 
-  // ── ボディ
   const tbody = document.createElement('tbody');
   students.forEach(s => tbody.appendChild(buildStudentRow(s, qnos)));
   table.appendChild(tbody);
@@ -531,7 +877,6 @@ function buildStudentRow(student, qnos) {
   const tr = document.createElement('tr');
   tr.dataset.pageIndex = student.page_index;
 
-  // 出席番号
   const snoTd = document.createElement('td');
   snoTd.className = 'col-sno' + (student.student_no_status === 'review' ? ' sno-review' : '');
   snoTd.textContent = student.student_no || '—';
@@ -540,14 +885,12 @@ function buildStudentRow(student, qnos) {
   snoTd.onclick = () => editStudentNo(student, snoTd, tr);
   tr.appendChild(snoTd);
 
-  // 氏名
   const nameTd = document.createElement('td');
   nameTd.className = 'col-name';
   nameTd.id = `name-${student.page_index}`;
   nameTd.textContent = student.name || '—';
   tr.appendChild(nameTd);
 
-  // 解答セル
   qnos.forEach(q => {
     const r = student.results[q] || {};
     const td = document.createElement('td');
@@ -562,7 +905,6 @@ function buildStudentRow(student, qnos) {
     tr.appendChild(td);
   });
 
-  // 合計
   const scoreTd = document.createElement('td');
   scoreTd.className = 'col-score';
   scoreTd.id = `score-${student.page_index}`;
@@ -572,9 +914,9 @@ function buildStudentRow(student, qnos) {
   return tr;
 }
 
-// ─── セル編集 ─────────────────────────────────────────────────────────────
+// ─── セル編集（Tab③）────────────────────────────────────────────────────
 function editCell(student, q, td, span, tr) {
-  if (td.querySelector('select')) return; // 編集中
+  if (td.querySelector('select')) return;
   const original = span.textContent;
   span.style.display = 'none';
 
@@ -605,6 +947,14 @@ function editCell(student, q, td, span, tr) {
       span.textContent = r.read || '';
       const scoreTd = document.getElementById(`score-${student.page_index}`);
       if (scoreTd) scoreTd.textContent = `${data.score}/${data.max_score}`;
+      // Tab② オーバーレイも同期
+      if (gradeCurrentPage === student.page_index) {
+        student.results[q] = r;
+        student.score = data.score;
+        _updateStudentOverlayCell(q, r);
+        const scoreEl = document.getElementById(`gradeScore-${student.page_index}`);
+        if (scoreEl) scoreEl.textContent = `${data.score}/${data.max_score}`;
+      }
     } catch(e) {
       span.textContent = original;
       setStatus(document.getElementById('reviewStatus'), `エラー: ${e.message}`, 'error');
@@ -614,7 +964,7 @@ function editCell(student, q, td, span, tr) {
   sel.addEventListener('blur',   apply);
 }
 
-// ─── 出席番号編集 ─────────────────────────────────────────────────────────
+// ─── 出席番号編集（Tab③）────────────────────────────────────────────────
 function editStudentNo(student, td, tr) {
   if (td.querySelector('input')) return;
   const original = student.student_no || '';
@@ -643,6 +993,8 @@ function editStudentNo(student, td, tr) {
       td.className = 'col-sno' + (student.student_no_status === 'review' ? ' sno-review' : '');
       const nameTd = document.getElementById(`name-${student.page_index}`);
       if (nameTd) nameTd.textContent = data.name || '—';
+      // Tab② バーも同期
+      if (gradeCurrentPage === student.page_index) _renderStudentBar(student);
     } catch(e) {
       td.textContent = original || '—';
       setStatus(document.getElementById('reviewStatus'), `エラー: ${e.message}`, 'error');
@@ -685,19 +1037,16 @@ async function downloadCsv() {
 
 // ─── 初期化 ──────────────────────────────────────────────────────────────
 (async () => {
-  // 正解データが既存なら Phase 1 グリッドを表示
   try {
     const r = await fetch('/api/answer-key');
     if (r.ok) {
       const ak = await r.json();
-      const rc = Object.values(ak.review||{}).filter(Boolean).length;
       setStatus(document.getElementById('akStatus'),
         `既存の正解データが登録済みです（${ak.num_questions} 問）`, 'info');
       await renderAkGrid();
     }
   } catch(_) {}
 
-  // 前回のセッションを復元
   if (currentSessionId) {
     try {
       const r = await fetch(`/api/session/${currentSessionId}`);
@@ -705,8 +1054,9 @@ async function downloadCsv() {
         const data = await r.json();
         currentSession = data;
         updateExportPanel();
-        // ③ タブのグリッドを事前ロード（表示はタブ切替時）
         renderGrid(data);
+        const firstPage = getPagesSorted(data)[0] ?? 0;
+        await renderGradePageView(data, firstPage);
       } else {
         currentSessionId = null;
         localStorage.removeItem('sessionId');
