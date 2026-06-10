@@ -1,0 +1,17 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# macOS
+.DS_Store
+
+# 生成データ（個人情報・大容量）
+data/sessions/
+data/uploads/
+data/roster.csv
+outputs/
+
+# 試験用 PDF（バイナリ・大容量）
+auto_scoring/

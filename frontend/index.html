@@ -1,0 +1,606 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>自動採点システム</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: sans-serif; background: #f0f2f5; color: #333; }
+
+    /* ─── タブ ─────────────────────────────────── */
+    .tabs { display: flex; background: #2c3e50; flex-wrap: wrap; }
+    .tab-btn {
+      padding: 13px 22px; color: #aaa; border: none; background: none;
+      font-size: 14px; cursor: pointer; white-space: nowrap;
+    }
+    .tab-btn.active { color: #fff; border-bottom: 3px solid #3498db; }
+    .tab-pane { display: none; padding: 20px; }
+    .tab-pane.active { display: block; }
+
+    /* ─── カード ───────────────────────────────── */
+    .card {
+      background: #fff; border-radius: 8px; padding: 20px;
+      margin-bottom: 16px; box-shadow: 0 1px 4px rgba(0,0,0,.08);
+    }
+    h2 { font-size: 17px; margin-bottom: 14px; color: #2c3e50; }
+
+    /* ─── フォーム ─────────────────────────────── */
+    .upload-area {
+      border: 2px dashed #ccc; border-radius: 8px; padding: 30px;
+      text-align: center; background: #fafafa;
+    }
+    .upload-area p { margin-bottom: 10px; color: #555; }
+    .upload-row { display: flex; align-items: center; gap: 12px; margin: 8px 0; flex-wrap: wrap; justify-content: center; }
+    .upload-row label { font-size: 13px; color: #666; }
+    input[type="file"] { font-size: 13px; }
+
+    /* ─── ボタン ───────────────────────────────── */
+    .btn { padding: 9px 18px; border-radius: 6px; border: none; cursor: pointer; font-size: 14px; font-weight: 500; }
+    .btn-primary  { background: #3498db; color: #fff; }
+    .btn-primary:hover  { background: #2980b9; }
+    .btn-success  { background: #27ae60; color: #fff; }
+    .btn-success:hover  { background: #219a52; }
+    .btn-danger   { background: #e74c3c; color: #fff; }
+    .btn-danger:hover   { background: #c0392b; }
+    .btn:disabled { background: #bdc3c7; cursor: default; }
+
+    /* ─── ステータス ───────────────────────────── */
+    .status { padding: 10px 14px; border-radius: 6px; margin-top: 10px; font-size: 13px; }
+    .status.info    { background: #eaf4fb; color: #1a5276; }
+    .status.success { background: #eafaf1; color: #1e8449; }
+    .status.error   { background: #fdedec; color: #922b21; }
+
+    /* ─── ローダー ─────────────────────────────── */
+    .loader { display: none; text-align: center; padding: 20px; color: #777; font-size: 14px; }
+    .loader.active { display: block; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spinner {
+      display: inline-block; width: 24px; height: 24px;
+      border: 3px solid #ddd; border-top-color: #3498db;
+      border-radius: 50%; animation: spin .8s linear infinite;
+      vertical-align: middle; margin-right: 8px;
+    }
+
+    /* ─── 正解グリッド（Phase 1）─────────────────── */
+    .answer-grid {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(90px, 1fr)); gap: 5px; margin-top: 10px;
+    }
+    .answer-cell { border: 1px solid #ddd; border-radius: 4px; padding: 5px; text-align: center; font-size: 13px; }
+    .answer-cell.review { border-color: #e67e22; background: #fef9e7; }
+    .answer-cell .qno { font-size: 10px; color: #999; }
+    .answer-cell select { width: 100%; border: none; background: transparent; font-size: 13px; text-align: center; cursor: pointer; }
+
+    /* ─── 採点グリッド（Phase 3）─────────────────── */
+    #tab-review .card { overflow: hidden; }
+    .grid-toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
+    .grid-toolbar .stat { font-size: 13px; color: #555; }
+    .grid-toolbar .stat span { font-weight: bold; }
+
+    .table-wrap { overflow-x: auto; max-height: 72vh; overflow-y: auto; border: 1px solid #e0e0e0; border-radius: 6px; }
+    #gradeGrid { border-collapse: collapse; font-size: 13px; min-width: max-content; }
+
+    #gradeGrid thead th {
+      background: #2c3e50; color: #fff; padding: 7px 6px;
+      position: sticky; top: 0; z-index: 10; white-space: nowrap;
+      border-right: 1px solid #3d5166; text-align: center;
+    }
+    #gradeGrid thead th:first-child,
+    #gradeGrid thead th:nth-child(2) {
+      position: sticky; z-index: 20; left: 0;
+    }
+    #gradeGrid thead th:nth-child(2) { left: 70px; }
+
+    #gradeGrid tbody tr:nth-child(even) { background: #f9f9f9; }
+    #gradeGrid tbody tr:hover > td { filter: brightness(0.96); }
+
+    #gradeGrid td { padding: 5px 6px; border-right: 1px solid #eee; border-bottom: 1px solid #eee; text-align: center; white-space: nowrap; }
+
+    /* 固定列 */
+    #gradeGrid td.col-sno,
+    #gradeGrid td.col-name,
+    #gradeGrid td.col-score {
+      background: inherit; position: sticky; z-index: 5;
+    }
+    #gradeGrid td.col-sno  { left: 0; min-width: 68px; }
+    #gradeGrid td.col-name { left: 70px; min-width: 90px; border-right: 2px solid #ccc; }
+    #gradeGrid td.col-score { right: 0; min-width: 58px; border-left: 2px solid #ccc; font-weight: bold; }
+
+    /* 出席番号 review 強調 */
+    #gradeGrid td.col-sno.sno-review { background: #fdebd0 !important; color: #935116; }
+
+    /* セル色分け */
+    .judge-correct { background: #d5f5e3 !important; }
+    .judge-wrong   { background: #fadbd8 !important; }
+    .judge-blank   { background: #f2f3f4 !important; color: #aaa; }
+    .judge-review  { background: #fef9e7 !important; color: #7d6608; }
+
+    /* セル編集 */
+    .answer-cell-inner { cursor: pointer; min-width: 28px; display: inline-block; }
+    .answer-cell-inner:hover { opacity: .75; }
+    .cell-select { width: 52px; font-size: 12px; border: none; background: transparent; cursor: pointer; }
+
+    /* 凡例 */
+    .legend { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+    .legend-item { display: flex; align-items: center; gap: 5px; font-size: 12px; }
+    .legend-box { width: 16px; height: 16px; border-radius: 3px; border: 1px solid #ccc; }
+
+    /* 確定バナー */
+    .confirmed-banner {
+      background: #1a5276; color: #fff; text-align: center; padding: 10px;
+      border-radius: 6px; font-weight: bold; margin-bottom: 12px; font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+
+<div class="tabs">
+  <button class="tab-btn active" data-tab="tab-answer-key" onclick="showTab(this)">① 正解登録</button>
+  <button class="tab-btn"        data-tab="tab-grade"      onclick="showTab(this)">② 採点</button>
+  <button class="tab-btn"        data-tab="tab-review"     onclick="showTab(this)">③ 確認・修正</button>
+  <button class="tab-btn"        data-tab="tab-export"     onclick="showTab(this)">④ 出力</button>
+</div>
+
+<!-- ① 正解登録 -->
+<div id="tab-answer-key" class="tab-pane active">
+  <div class="card">
+    <h2>正解 PDF をアップロード</h2>
+    <div class="upload-area">
+      <p>正解が記入された解答用紙 PDF を選択してください。</p>
+      <div class="upload-row">
+        <label>PDF ファイル: <input type="file" id="akFile" accept=".pdf,image/*"></label>
+        <button class="btn btn-primary" id="akBtn" onclick="uploadAnswerKey()">OCR 解析 → 正解登録</button>
+      </div>
+    </div>
+    <div class="loader" id="akLoader"><span class="spinner"></span>OCR 処理中（30 秒〜2 分）…</div>
+    <div id="akStatus"></div>
+  </div>
+  <div class="card" id="akResultCard" style="display:none">
+    <h2>解析結果 — 目視確認・修正</h2>
+    <p id="akSummary" style="font-size:13px;margin-bottom:6px;"></p>
+    <p id="akStudentNo" style="font-size:12px;color:#666;margin-bottom:10px;"></p>
+    <div class="answer-grid" id="answerGrid"></div>
+    <br>
+    <button class="btn btn-success" onclick="saveAkEdits()">修正を保存</button>
+    <div id="editStatus"></div>
+  </div>
+</div>
+
+<!-- ② 採点 -->
+<div id="tab-grade" class="tab-pane">
+  <div class="card">
+    <h2>生徒答案をアップロード</h2>
+    <div class="upload-area">
+      <p>生徒答案 PDF（1人1ページ）をアップロードしてください。</p>
+      <div class="upload-row">
+        <label>答案 PDF: <input type="file" id="gradeFile" accept=".pdf,image/*"></label>
+      </div>
+      <div class="upload-row">
+        <label>名簿 CSV（任意）: <input type="file" id="rosterFile" accept=".csv"></label>
+      </div>
+      <div class="upload-row">
+        <button class="btn btn-primary" id="gradeBtn" onclick="startGrading()">採点開始</button>
+      </div>
+    </div>
+    <div class="loader" id="gradeLoader"><span class="spinner"></span>OCR & 採点処理中…</div>
+    <div id="gradeStatus"></div>
+  </div>
+</div>
+
+<!-- ③ 確認・修正 -->
+<div id="tab-review" class="tab-pane">
+  <div class="card">
+    <h2>採点結果 — 確認・修正</h2>
+    <div id="confirmedBanner" style="display:none" class="confirmed-banner">✓ このセッションは確定済みです</div>
+    <div class="grid-toolbar">
+      <div class="legend">
+        <div class="legend-item"><div class="legend-box" style="background:#d5f5e3"></div>正解</div>
+        <div class="legend-item"><div class="legend-box" style="background:#fadbd8"></div>不正解</div>
+        <div class="legend-item"><div class="legend-box" style="background:#f2f3f4"></div>無答</div>
+        <div class="legend-item"><div class="legend-box" style="background:#fef9e7"></div>要確認</div>
+        <div class="legend-item"><div class="legend-box" style="background:#fdebd0"></div>番号不明</div>
+      </div>
+      <div class="stat" id="gridStat"></div>
+      <button class="btn btn-success" id="confirmBtn" onclick="confirmSession()" style="margin-left:auto">確定</button>
+    </div>
+    <div id="reviewStatus"></div>
+    <div class="table-wrap">
+      <table id="gradeGrid"></table>
+    </div>
+  </div>
+</div>
+
+<!-- ④ 出力 -->
+<div id="tab-export" class="tab-pane">
+  <div class="card">
+    <h2>CSV 出力</h2>
+    <p style="font-size:13px;margin-bottom:12px;">確定済みセッションを CSV でダウンロードします。</p>
+    <div id="exportSessionInfo" style="font-size:13px;color:#666;margin-bottom:12px;"></div>
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+      <label style="font-size:13px;">エンコーディング:
+        <select id="csvEncoding">
+          <option value="utf-8-sig">UTF-8 (BOM付 / Excel対応)</option>
+          <option value="shift_jis">Shift-JIS</option>
+        </select>
+      </label>
+      <button class="btn btn-primary" onclick="downloadCsv()">CSV ダウンロード</button>
+    </div>
+    <div id="exportStatus"></div>
+  </div>
+</div>
+
+<script>
+// ─── グローバル状態 ────────────────────────────────────────────────────────
+let currentSessionId = localStorage.getItem('sessionId') || null;
+let currentSession   = null;
+const VALID_CHOICES  = ['ア','イ','ウ','エ'];
+
+// ─── タブ切替 ──────────────────────────────────────────────────────────────
+function showTab(btn) {
+  document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById(btn.dataset.tab).classList.add('active');
+  btn.classList.add('active');
+}
+
+function setStatus(el, msg, type) {
+  el.innerHTML = `<div class="status ${type}">${msg}</div>`;
+}
+
+// ─── Phase 1: 正解登録 ────────────────────────────────────────────────────
+async function uploadAnswerKey() {
+  const file = document.getElementById('akFile').files[0];
+  if (!file) { alert('ファイルを選択してください'); return; }
+  const btn = document.getElementById('akBtn');
+  btn.disabled = true;
+  document.getElementById('akLoader').classList.add('active');
+  document.getElementById('akStatus').innerHTML = '';
+  document.getElementById('akResultCard').style.display = 'none';
+  const fd = new FormData(); fd.append('file', file);
+  try {
+    const res = await fetch('/api/answer-key', { method: 'POST', body: fd });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || res.statusText);
+    setStatus(document.getElementById('akStatus'),
+      `✓ 登録完了：${data.num_questions} 問、要確認 ${data.review_count} セル`, 'success');
+    await renderAkGrid();
+  } catch(e) {
+    setStatus(document.getElementById('akStatus'), `エラー: ${e.message}`, 'error');
+  } finally {
+    btn.disabled = false;
+    document.getElementById('akLoader').classList.remove('active');
+  }
+}
+
+async function renderAkGrid() {
+  const res = await fetch('/api/answer-key');
+  if (!res.ok) return;
+  const ak = await res.json();
+  const review = ak.review || {};
+  const rc = Object.values(review).filter(Boolean).length;
+  const grid = document.getElementById('answerGrid');
+  grid.innerHTML = '';
+  Object.keys(ak.answers).sort((a,b)=>+a-+b).forEach(q => {
+    const val = ak.answers[q];
+    const isRev = review[q];
+    const div = document.createElement('div');
+    div.className = 'answer-cell' + (isRev ? ' review' : '');
+    div.innerHTML = `<div class="qno">問${q}</div>`;
+    const sel = document.createElement('select');
+    sel.dataset.q = q;
+    ['',...VALID_CHOICES].forEach(ch => {
+      const opt = document.createElement('option');
+      opt.value = ch; opt.textContent = ch || '（空）';
+      if (ch === val) opt.selected = true;
+      sel.appendChild(opt);
+    });
+    if (val && !VALID_CHOICES.includes(val) && val !== '') {
+      const opt = document.createElement('option');
+      opt.value = val; opt.textContent = `${val}?`; opt.selected = true;
+      sel.appendChild(opt);
+    }
+    sel.addEventListener('change', () => div.classList.remove('review'));
+    div.appendChild(sel);
+    grid.appendChild(div);
+  });
+  document.getElementById('akSummary').textContent =
+    `${ak.num_questions} 問検出。黄色セル（${rc} 個）は要確認です。修正後「修正を保存」を押してください。`;
+  const sno = ak.template?.student_no || {};
+  document.getElementById('akStudentNo').textContent =
+    `出席番号: method=${sno.method} / bbox=[${(sno.bbox_norm||[]).join(', ')}] / digits=${sno.digits}`;
+  document.getElementById('akResultCard').style.display = 'block';
+}
+
+async function saveAkEdits() {
+  const selects = document.querySelectorAll('#answerGrid select');
+  let errors = 0;
+  for (const sel of selects) {
+    const res = await fetch('/api/answer-key/cell', {
+      method: 'PATCH',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({q: sel.dataset.q, value: sel.value}),
+    });
+    if (!res.ok) errors++;
+  }
+  const msg = errors
+    ? `${errors} 件の保存に失敗しました。`
+    : `${selects.length} 問を保存しました。`;
+  setStatus(document.getElementById('editStatus'), msg, errors ? 'error' : 'success');
+}
+
+// ─── Phase 2: 採点 ────────────────────────────────────────────────────────
+async function startGrading() {
+  const gradeFile  = document.getElementById('gradeFile').files[0];
+  const rosterFile = document.getElementById('rosterFile').files[0];
+  if (!gradeFile) { alert('ファイルを選択してください'); return; }
+  const btn = document.getElementById('gradeBtn');
+  btn.disabled = true;
+  document.getElementById('gradeLoader').classList.add('active');
+  document.getElementById('gradeStatus').innerHTML = '';
+  try {
+    if (rosterFile) {
+      const fd = new FormData(); fd.append('file', rosterFile);
+      await fetch('/api/roster', { method: 'POST', body: fd });
+    }
+    const fd = new FormData(); fd.append('file', gradeFile);
+    const res = await fetch('/api/grade', { method: 'POST', body: fd });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || res.statusText);
+    currentSessionId = data.session_id;
+    currentSession   = data;
+    localStorage.setItem('sessionId', currentSessionId);
+    setStatus(document.getElementById('gradeStatus'),
+      `✓ 採点完了: ${data.students.length} 人分 → 確認・修正タブへ`, 'success');
+    // ③ タブへ切替
+    const btn3 = document.querySelector('.tab-btn[data-tab="tab-review"]');
+    showTab(btn3);
+    renderGrid(data);
+  } catch(e) {
+    setStatus(document.getElementById('gradeStatus'), `エラー: ${e.message}`, 'error');
+  } finally {
+    btn.disabled = false;
+    document.getElementById('gradeLoader').classList.remove('active');
+  }
+}
+
+// ─── Phase 3: 確認・修正グリッド ─────────────────────────────────────────
+function renderGrid(data) {
+  currentSession = data;
+  const students = data.students || [];
+  if (!students.length) { document.getElementById('gradeGrid').innerHTML = '<tr><td>データなし</td></tr>'; return; }
+
+  const qnos = Object.keys(students[0].results || {}).sort((a,b) => +a - +b);
+
+  // 統計
+  let totalReview = 0, totalBlank = 0, totalCorrect = 0;
+  students.forEach(s => {
+    Object.values(s.results).forEach(r => {
+      if (r.judge === 'review')  totalReview++;
+      if (r.judge === 'blank')   totalBlank++;
+      if (r.judge === 'correct') totalCorrect++;
+    });
+  });
+  document.getElementById('gridStat').innerHTML =
+    `生徒 <span>${students.length}</span> 人 / 問 <span>${qnos.length}</span> 問 ` +
+    `/ 要確認 <span style="color:#7d6608">${totalReview}</span> セル ` +
+    `/ 無答 <span style="color:#888">${totalBlank}</span> セル`;
+
+  // 確定バナー
+  document.getElementById('confirmedBanner').style.display = data.confirmed ? 'block' : 'none';
+  document.getElementById('confirmBtn').disabled = !!data.confirmed;
+
+  const table = document.getElementById('gradeGrid');
+  table.innerHTML = '';
+
+  // ── ヘッダー
+  const thead = document.createElement('thead');
+  const hr = document.createElement('tr');
+  addTh(hr, '出席番号');
+  addTh(hr, '氏名');
+  qnos.forEach(q => addTh(hr, `Q${q}`));
+  addTh(hr, '合計');
+  thead.appendChild(hr); table.appendChild(thead);
+
+  // ── ボディ
+  const tbody = document.createElement('tbody');
+  students.forEach(s => tbody.appendChild(buildStudentRow(s, qnos)));
+  table.appendChild(tbody);
+}
+
+function addTh(tr, text) {
+  const th = document.createElement('th');
+  th.textContent = text;
+  tr.appendChild(th);
+}
+
+function buildStudentRow(student, qnos) {
+  const tr = document.createElement('tr');
+  tr.dataset.pageIndex = student.page_index;
+
+  // 出席番号
+  const snoTd = document.createElement('td');
+  snoTd.className = 'col-sno' + (student.student_no_status === 'review' ? ' sno-review' : '');
+  snoTd.textContent = student.student_no || '—';
+  snoTd.title = 'クリックで編集';
+  snoTd.style.cursor = 'pointer';
+  snoTd.onclick = () => editStudentNo(student, snoTd, tr);
+  tr.appendChild(snoTd);
+
+  // 氏名
+  const nameTd = document.createElement('td');
+  nameTd.className = 'col-name';
+  nameTd.id = `name-${student.page_index}`;
+  nameTd.textContent = student.name || '—';
+  tr.appendChild(nameTd);
+
+  // 解答セル
+  qnos.forEach(q => {
+    const r = student.results[q] || {};
+    const td = document.createElement('td');
+    td.className = `judge-${r.judge || 'blank'}`;
+    td.dataset.q = q;
+    const span = document.createElement('span');
+    span.className = 'answer-cell-inner';
+    span.textContent = r.read || '';
+    span.title = 'クリックで編集';
+    span.onclick = () => editCell(student, q, td, span, tr);
+    td.appendChild(span);
+    tr.appendChild(td);
+  });
+
+  // 合計
+  const scoreTd = document.createElement('td');
+  scoreTd.className = 'col-score';
+  scoreTd.id = `score-${student.page_index}`;
+  scoreTd.textContent = `${student.score}/${student.max_score}`;
+  tr.appendChild(scoreTd);
+
+  return tr;
+}
+
+// ─── セル編集 ─────────────────────────────────────────────────────────────
+function editCell(student, q, td, span, tr) {
+  if (td.querySelector('select')) return; // 編集中
+  const original = span.textContent;
+  span.style.display = 'none';
+
+  const sel = document.createElement('select');
+  sel.className = 'cell-select';
+  ['',...VALID_CHOICES].forEach(ch => {
+    const opt = document.createElement('option');
+    opt.value = ch; opt.textContent = ch || '—';
+    if (ch === original) opt.selected = true;
+    sel.appendChild(opt);
+  });
+  td.appendChild(sel);
+  sel.focus();
+
+  const apply = async () => {
+    const val = sel.value;
+    sel.remove(); span.style.display = '';
+    try {
+      const res = await fetch(`/api/session/${currentSessionId}/cell`, {
+        method: 'PATCH',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({page_index: student.page_index, q, value: val}),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail);
+      const r = data.result;
+      td.className = `judge-${r.judge}`;
+      span.textContent = r.read || '';
+      const scoreTd = document.getElementById(`score-${student.page_index}`);
+      if (scoreTd) scoreTd.textContent = `${data.score}/${data.max_score}`;
+    } catch(e) {
+      span.textContent = original;
+      setStatus(document.getElementById('reviewStatus'), `エラー: ${e.message}`, 'error');
+    }
+  };
+  sel.addEventListener('change', apply);
+  sel.addEventListener('blur',   apply);
+}
+
+// ─── 出席番号編集 ─────────────────────────────────────────────────────────
+function editStudentNo(student, td, tr) {
+  if (td.querySelector('input')) return;
+  const original = student.student_no || '';
+  td.textContent = '';
+
+  const inp = document.createElement('input');
+  inp.type = 'text'; inp.value = original;
+  inp.style.cssText = 'width:58px;font-size:12px;border:1px solid #aaa;padding:2px;';
+  td.appendChild(inp);
+  inp.focus(); inp.select();
+
+  const apply = async () => {
+    const val = inp.value.trim();
+    inp.remove();
+    try {
+      const res = await fetch(`/api/session/${currentSessionId}/student-no`, {
+        method: 'PATCH',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({page_index: student.page_index, value: val}),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail);
+      student.student_no = val;
+      student.student_no_status = val ? 'ok' : 'review';
+      td.textContent = val || '—';
+      td.className = 'col-sno' + (student.student_no_status === 'review' ? ' sno-review' : '');
+      const nameTd = document.getElementById(`name-${student.page_index}`);
+      if (nameTd) nameTd.textContent = data.name || '—';
+    } catch(e) {
+      td.textContent = original || '—';
+      setStatus(document.getElementById('reviewStatus'), `エラー: ${e.message}`, 'error');
+    }
+  };
+  inp.addEventListener('blur',  apply);
+  inp.addEventListener('keydown', e => { if (e.key === 'Enter') inp.blur(); if (e.key === 'Escape') { inp.remove(); td.textContent = original || '—'; } });
+}
+
+// ─── 確定 ─────────────────────────────────────────────────────────────────
+async function confirmSession() {
+  if (!currentSessionId) { alert('セッションがありません'); return; }
+  if (!confirm('採点を確定しますか？確定後は自動再採点されません。')) return;
+  try {
+    const res = await fetch(`/api/session/${currentSessionId}/confirm`, { method: 'POST' });
+    if (!res.ok) throw new Error((await res.json()).detail);
+    document.getElementById('confirmedBanner').style.display = 'block';
+    document.getElementById('confirmBtn').disabled = true;
+    setStatus(document.getElementById('reviewStatus'), '✓ 確定しました。CSV 出力タブからダウンロードできます。', 'success');
+    updateExportPanel();
+  } catch(e) {
+    setStatus(document.getElementById('reviewStatus'), `エラー: ${e.message}`, 'error');
+  }
+}
+
+// ─── Phase 4: CSV 出力 ───────────────────────────────────────────────────
+function updateExportPanel() {
+  const el = document.getElementById('exportSessionInfo');
+  el.textContent = currentSessionId
+    ? `セッション: ${currentSessionId}`
+    : 'セッションがありません。先に採点してください。';
+}
+
+async function downloadCsv() {
+  if (!currentSessionId) { alert('セッションがありません'); return; }
+  const enc = document.getElementById('csvEncoding').value;
+  const url = `/api/session/${currentSessionId}/csv?encoding=${enc}`;
+  const a = document.createElement('a'); a.href = url; a.click();
+}
+
+// ─── 初期化 ──────────────────────────────────────────────────────────────
+(async () => {
+  // 正解データが既存なら Phase 1 グリッドを表示
+  try {
+    const r = await fetch('/api/answer-key');
+    if (r.ok) {
+      const ak = await r.json();
+      const rc = Object.values(ak.review||{}).filter(Boolean).length;
+      setStatus(document.getElementById('akStatus'),
+        `既存の正解データが登録済みです（${ak.num_questions} 問）`, 'info');
+      await renderAkGrid();
+    }
+  } catch(_) {}
+
+  // 前回のセッションを復元
+  if (currentSessionId) {
+    try {
+      const r = await fetch(`/api/session/${currentSessionId}`);
+      if (r.ok) {
+        const data = await r.json();
+        currentSession = data;
+        updateExportPanel();
+        // ③ タブのグリッドを事前ロード（表示はタブ切替時）
+        renderGrid(data);
+      } else {
+        currentSessionId = null;
+        localStorage.removeItem('sessionId');
+      }
+    } catch(_) {}
+  }
+  updateExportPanel();
+})();
+</script>
+</body>
+</html>
