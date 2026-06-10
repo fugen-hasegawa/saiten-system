@@ -8,15 +8,21 @@
   "ocr_correction_map": {
     "ｱ": "ア",  "ｲ": "イ",  "ｳ": "ウ",  "ｴ": "エ",
     "ァ": "ア",  "ィ": "イ",  "ゥ": "ウ",  "ェ": "エ",
-    "A": "ア",  "At": "ア",  "a": "ア",  "7": "ア",
+    "A": "ア",  "At": "ア",  "At.": "ア",  "a": "ア",  "7": "ア",  "∧": "ア",
     "了": "ア",  "亜": "ア",
-    "I": "イ",  "1": "イ",  "l": "イ",
-    "U": "ウ",
-    "E": "エ",  "工": "エ",
+    "I": "イ",  "i": "イ",  "1": "イ",  "l": "イ",  "|": "イ",
+    "U": "ウ",  "u": "ウ",  "∪": "ウ",
+    "E": "エ",  "e": "エ",  "工": "エ",  "王": "エ",
     "H": null,  "P": null,  "O": null,  "S": null,  "T": null,
     "R": null,  "B": null,  "C": null,  "D": null,  "F": null,
-    "G": null,  "J": null,  "K": null,  "M": null,  "N": null,
-    "Q": null,  "V": null,  "W": null,  "X": null,  "Y": null,  "Z": null
+    "G": null,  "J": null,  "K": null,  "L": null,  "M": null,  "N": null,
+    "Q": null,  "V": null,  "W": null,  "X": null,  "Y": null,  "Z": null,
+    "b": null,  "c": null,  "d": null,  "f": null,  "g": null,  "h": null,
+    "j": null,  "k": null,  "m": null,  "n": null,  "o": null,  "p": null,
+    "q": null,  "r": null,  "s": null,  "t": null,  "v": null,  "w": null,
+    "x": null,  "y": null,  "z": null,
+    "0": null,  "2": null,  "3": null,  "4": null,  "5": null,
+    "6": null,  "8": null,  "9": null
   },
   "student_no": {
     "digits": 2

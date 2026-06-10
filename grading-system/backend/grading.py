@@ -53,6 +53,10 @@ def normalize_choice(
     if t2 in valid_choices:
         return t2, "ok"
 
+    # 日本語文字（ひらがな・カタカナ・漢字）を含まない＝英数字の誤読
+    if t2 and not any('぀' <= c <= 'ヿ' or '一' <= c <= '鿿' for c in t2):
+        return None, "review"
+
     return None, "out_of_set"
 
 
@@ -285,6 +289,9 @@ def judge_answers(
         raw = read_answers.get(q, "")
         normalized, status = normalize_choice(raw, valid_choices, correction_map)
 
+        def _has_japanese(s: str) -> bool:
+            return any('぀' <= c <= 'ヿ' or '一' <= c <= '鿿' for c in s)
+
         if status == "blank":
             judge = "blank"
             review = False
@@ -292,7 +299,8 @@ def judge_answers(
         elif status in ("review", "out_of_set"):
             judge = "review"
             review = True
-            display = normalized or raw or ""
+            # 英数字の誤読は表示しない（オレンジ空セルで要確認を示す）
+            display = normalized or (raw if _has_japanese(raw) else "") or ""
         elif not correct:
             # 正解が未設定（review中の正解キー）
             judge = "review"
