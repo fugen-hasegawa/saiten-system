@@ -62,15 +62,6 @@
       vertical-align: middle; margin-right: 8px;
     }
 
-    /* ─── 正解グリッド（Phase 1）─────────────────── */
-    .answer-grid {
-      display: grid; grid-template-columns: repeat(auto-fill, minmax(90px, 1fr)); gap: 5px; margin-top: 10px;
-    }
-    .answer-cell { border: 1px solid #ddd; border-radius: 4px; padding: 5px; text-align: center; font-size: 13px; }
-    .answer-cell.review { border-color: #e67e22; background: #fef9e7; }
-    .answer-cell .qno { font-size: 10px; color: #999; }
-    .answer-cell select { width: 100%; border: none; background: transparent; font-size: 13px; text-align: center; cursor: pointer; }
-
     /* ─── 解答用紙プレビュー（共通）─────────────── */
     .page-preview-wrap {
       overflow: auto; max-height: 75vh;
@@ -145,6 +136,15 @@
       border-radius: 6px; font-weight: bold; margin-bottom: 12px; font-size: 14px;
     }
 
+    /* ─── 正解ページビュー（Tab①）────────────── */
+    .ak-summary-bar {
+      display: flex; align-items: center; gap: 20px; flex-wrap: wrap;
+      background: #eafaf1; border-radius: 6px; padding: 8px 16px;
+      margin-bottom: 12px; font-size: 13px; color: #2c3e50;
+    }
+    .ak-summary-bar .review-count { color: #e67e22; font-weight: bold; }
+    .ak-summary-bar .review-count.zero { color: #27ae60; }
+
     /* ─── 採点ページナビ（Tab②）───────────────── */
     .grade-nav-bar {
       display: flex; align-items: center; gap: 8px; margin-bottom: 12px; flex-wrap: wrap;
@@ -163,15 +163,15 @@
     .sno-edit:hover { color: #1a5276; }
 
     /* ─── オーバーレイ編集ポップアップ ──────────── */
-    #gradeOverlayEditor {
+    #gradeOverlayEditor, #akOverlayEditor {
       display: none; position: fixed; z-index: 9999;
       background: #fff; border: 1px solid #aaa; border-radius: 8px;
       padding: 10px 14px; box-shadow: 0 4px 16px rgba(0,0,0,.25);
     }
-    #gradeOverlayEditor .oe-label {
+    #gradeOverlayEditor .oe-label, #akOverlayEditor .oe-label {
       font-size: 12px; color: #777; margin-bottom: 6px;
     }
-    #gradeOverlayEditor select {
+    #gradeOverlayEditor select, #akOverlayEditor select {
       font-size: 16px; padding: 4px 8px; border: 1px solid #ccc;
       border-radius: 4px; width: 100%;
     }
@@ -200,22 +200,14 @@
     <div class="loader" id="akLoader"><span class="spinner"></span>OCR 処理中（30 秒〜2 分）…</div>
     <div id="akStatus"></div>
   </div>
-  <div class="card" id="akResultCard" style="display:none">
-    <h2>解析結果 — 目視確認・修正</h2>
-    <p id="akSummary" style="font-size:13px;margin-bottom:6px;"></p>
-    <p id="akStudentNo" style="font-size:12px;color:#666;margin-bottom:10px;"></p>
-    <div class="answer-grid" id="answerGrid"></div>
-    <br>
-    <button class="btn btn-success" onclick="saveAkEdits()">修正を保存</button>
-    <div id="editStatus"></div>
-  </div>
-  <!-- 解答用紙プレビュー -->
-  <div class="card" id="pagePreviewCard" style="display:none">
-    <h2>解答用紙プレビュー</h2>
-    <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:center;margin-bottom:10px;font-size:12px">
+  <!-- 正解ページビュー（OCR後に表示） -->
+  <div class="card" id="akPageCard" style="display:none">
+    <div class="ak-summary-bar" id="akSummaryBar"></div>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-bottom:8px;font-size:12px">
       <span><span style="display:inline-block;width:14px;height:14px;background:#27ae6644;border:2px solid #27ae60;vertical-align:middle;margin-right:4px;border-radius:2px"></span>自動読取</span>
       <span><span style="display:inline-block;width:14px;height:14px;background:#e67e2244;border:2px solid #e67e22;vertical-align:middle;margin-right:4px;border-radius:2px"></span>要確認</span>
       <span><span style="display:inline-block;width:14px;height:14px;background:#e74c3c44;border:2px solid #e74c3c;vertical-align:middle;margin-right:4px;border-radius:2px"></span>未入力</span>
+      <span style="color:#aaa;margin-left:6px;">セルをクリックで修正</span>
     </div>
     <div class="page-preview-wrap">
       <div class="page-preview-inner" id="pagePreviewInner">
@@ -223,6 +215,7 @@
         <svg id="pagePreviewSvg"></svg>
       </div>
     </div>
+    <div id="akPageStatus" style="margin-top:8px"></div>
   </div>
 </div>
 
@@ -358,7 +351,6 @@ async function uploadAnswerKey() {
   btn.disabled = true;
   document.getElementById('akLoader').classList.add('active');
   document.getElementById('akStatus').innerHTML = '';
-  document.getElementById('akResultCard').style.display = 'none';
   const fd = new FormData(); fd.append('file', file);
   try {
     const res = await fetch('/api/answer-key', { method: 'POST', body: fd });
@@ -380,44 +372,18 @@ async function renderAkGrid() {
   const res = await fetch('/api/answer-key');
   if (!res.ok) return;
   const ak = await res.json();
-  gradeAk = ak; // キャッシュ更新
+  gradeAk = ak;
+  _renderAkSummaryBar(ak);
+  document.getElementById('akPageCard').style.display = 'block';
+  renderPageOverlay(ak);
+}
+
+function _renderAkSummaryBar(ak) {
   const review = ak.review || {};
   const rc = Object.values(review).filter(Boolean).length;
-  const grid = document.getElementById('answerGrid');
-  grid.innerHTML = '';
-  Object.keys(ak.answers).sort((a,b)=>+a-+b).forEach(q => {
-    const val = ak.answers[q];
-    const isRev = review[q];
-    const div = document.createElement('div');
-    div.className = 'answer-cell' + (isRev ? ' review' : '');
-    div.innerHTML = `<div class="qno">問${q}</div>`;
-    const sel = document.createElement('select');
-    sel.dataset.q = q;
-    ['',...VALID_CHOICES].forEach(ch => {
-      const opt = document.createElement('option');
-      opt.value = ch; opt.textContent = ch || '（空）';
-      if (ch === val) opt.selected = true;
-      sel.appendChild(opt);
-    });
-    if (val && !VALID_CHOICES.includes(val) && val !== '') {
-      const opt = document.createElement('option');
-      opt.value = val; opt.textContent = `${val}?`; opt.selected = true;
-      sel.appendChild(opt);
-    }
-    sel.addEventListener('change', () => {
-      div.classList.remove('review');
-      updateOverlayCell(q, sel.value, false);
-    });
-    div.appendChild(sel);
-    grid.appendChild(div);
-  });
-  document.getElementById('akSummary').textContent =
-    `${ak.num_questions} 問検出。黄色セル（${rc} 個）は要確認です。修正後「修正を保存」を押してください。`;
-  const sno = ak.template?.student_no || {};
-  document.getElementById('akStudentNo').textContent =
-    `出席番号: method=${sno.method} / bbox=[${(sno.bbox_norm||[]).join(', ')}] / digits=${sno.digits}`;
-  document.getElementById('akResultCard').style.display = 'block';
-  renderPageOverlay(ak);
+  document.getElementById('akSummaryBar').innerHTML =
+    `<span>問題数: <strong>${ak.num_questions}</strong></span>` +
+    `<span>要確認: <span class="review-count${rc === 0 ? ' zero' : ''}">${rc} セル</span></span>`;
 }
 
 // ─── 解答用紙プレビュー（Tab①）─────────────────────────────────────────
@@ -432,12 +398,10 @@ function renderPageOverlay(ak) {
   const size    = ak.page_image_size;
   if (!bboxes || !size) return;
 
-  const card = document.getElementById('pagePreviewCard');
   const img  = document.getElementById('pagePreviewImg');
   const svg  = document.getElementById('pagePreviewSvg');
 
   img.src = `/api/answer-key/image?t=${Date.now()}`;
-  card.style.display = 'block';
 
   svg.setAttribute('viewBox', `0 0 ${size.w} ${size.h}`);
   svg.innerHTML = '';
@@ -564,45 +528,22 @@ async function applyAkOverlayEdit() {
     if (!res.ok) throw new Error(data.detail);
 
     // キャッシュ更新
+    const isReview = !val || !VALID_CHOICES.includes(val);
     if (gradeAk) {
       gradeAk.answers[q] = val;
-      gradeAk.review[q]  = !val || !VALID_CHOICES.includes(val);
+      gradeAk.review[q]  = isReview;
     }
 
     // SVGオーバーレイ更新
-    const isReview = !val || !VALID_CHOICES.includes(val);
     updateOverlayCell(q, val, isReview);
 
-    // テキストグリッド（answerGrid）も同期
-    const gridSel = document.querySelector(`#answerGrid select[data-q="${q}"]`);
-    if (gridSel) {
-      gridSel.value = val;
-      const cell = gridSel.closest('.answer-cell');
-      if (cell) cell.classList.toggle('review', isReview);
-    }
+    // サマリーバー更新
+    if (gradeAk) _renderAkSummaryBar(gradeAk);
 
-    setStatus(document.getElementById('editStatus'), `問${q} を「${val || '（空）'}」に保存しました。`, 'success');
+    setStatus(document.getElementById('akPageStatus'), `問${q} を「${val || '（空）'}」に保存しました。`, 'success');
   } catch(e) {
-    setStatus(document.getElementById('editStatus'), `エラー: ${e.message}`, 'error');
+    setStatus(document.getElementById('akPageStatus'), `エラー: ${e.message}`, 'error');
   }
-}
-
-async function saveAkEdits() {
-  const selects = document.querySelectorAll('#answerGrid select');
-  let errors = 0;
-  for (const sel of selects) {
-    const res = await fetch('/api/answer-key/cell', {
-      method: 'PATCH',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({q: sel.dataset.q, value: sel.value}),
-    });
-    if (!res.ok) errors++;
-  }
-  const msg = errors
-    ? `${errors} 件の保存に失敗しました。`
-    : `${selects.length} 問を保存しました。`;
-  setStatus(document.getElementById('editStatus'), msg, errors ? 'error' : 'success');
-  gradeAk = null; // answer key 更新後はキャッシュクリア
 }
 
 // ─── Phase 2: 採点 ────────────────────────────────────────────────────────
