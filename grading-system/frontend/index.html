@@ -291,9 +291,15 @@
 <!-- ④ 出力 -->
 <div id="tab-export" class="tab-pane">
   <div class="card">
-    <h2>CSV 出力</h2>
-    <p style="font-size:13px;margin-bottom:12px;">確定済みセッションを CSV でダウンロードします。</p>
+    <h2>採点済み PDF 出力</h2>
+    <p style="font-size:13px;margin-bottom:12px;">各生徒の答案に ○（正解）/ ×（不正解）を書き込み、右上に合計点を付けた PDF をダウンロードします。</p>
     <div id="exportSessionInfo" style="font-size:13px;color:#666;margin-bottom:12px;"></div>
+    <button class="btn btn-success" id="scoredPdfBtn" onclick="downloadScoredPdf()">採点済み PDF ダウンロード</button>
+    <div id="scoredPdfStatus" style="margin-top:8px"></div>
+  </div>
+  <div class="card">
+    <h2>CSV 出力</h2>
+    <p style="font-size:13px;margin-bottom:12px;">採点結果を CSV でダウンロードします。</p>
     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
       <label style="font-size:13px;">エンコーディング:
         <select id="csvEncoding">
@@ -1054,7 +1060,34 @@ async function confirmSession() {
   }
 }
 
-// ─── Phase 4: CSV 出力 ───────────────────────────────────────────────────
+// ─── Phase 4: 出力 ───────────────────────────────────────────────────────
+async function downloadScoredPdf() {
+  if (!currentSessionId) { alert('セッションがありません'); return; }
+  const btn = document.getElementById('scoredPdfBtn');
+  const statusEl = document.getElementById('scoredPdfStatus');
+  btn.disabled = true;
+  setStatus(statusEl, '<span class="spinner"></span>PDF 生成中（しばらくお待ちください）…', 'info');
+  try {
+    const res = await fetch(`/api/session/${currentSessionId}/scored-pdf`);
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.detail || res.statusText);
+    }
+    const blob = await res.blob();
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = `scored_${currentSessionId.slice(0, 8)}.pdf`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setStatus(statusEl, '✓ ダウンロードしました。', 'success');
+  } catch(e) {
+    setStatus(statusEl, `エラー: ${e.message}`, 'error');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 function updateExportPanel() {
   const el = document.getElementById('exportSessionInfo');
   el.textContent = currentSessionId

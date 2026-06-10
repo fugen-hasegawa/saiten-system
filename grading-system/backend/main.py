@@ -342,3 +342,141 @@ def get_session_csv(
         "Content-Type": f"text/csv; charset={encoding}",
     }
     return StreamingResponse(io.BytesIO(raw), headers=headers, media_type="text/csv")
+
+
+# ─── 採点済み PDF 生成 ───────────────────────────────────────────────────────
+
+def _get_draw_font(size: int):
+    """TrueType フォントを探してロードする（なければデフォルト）。"""
+    from PIL import ImageFont
+    for p in [
+        "/System/Library/Fonts/Helvetica.ttc",
+        "/System/Library/Fonts/Arial.ttf",
+        "/Library/Fonts/Arial.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+    ]:
+        if Path(p).exists():
+            try:
+                return ImageFont.truetype(p, size=size)
+            except Exception:
+                pass
+    try:
+        return ImageFont.load_default(size=size)
+    except TypeError:
+        return ImageFont.load_default()
+
+
+@app.get("/api/session/{session_id}/scored-pdf")
+def get_scored_pdf(session_id: str):
+    """
+    各生徒の答案画像に ○（正解・赤）/ ×（不正解・赤）を採点枠左に描き、
+    右上に合計点を付けた PDF を返す。
+    """
+    session = _load_session(session_id)
+    ak = load_answer_key()
+    if ak is None:
+        raise HTTPException(status_code=400, detail="正解データが未登録です。")
+
+    bboxes  = ak.get("answer_cell_bboxes", {})
+    orig_sz = ak.get("page_image_size", {})
+    orig_w  = orig_sz.get("w", 0)
+    orig_h  = orig_sz.get("h", 0)
+
+    if not bboxes:
+        raise HTTPException(status_code=400, detail="採点枠データがありません。正解PDFを再登録してください。")
+
+    from PIL import Image, ImageDraw
+
+    output_images: list = []
+
+    for student in sorted(session.get("students", []), key=lambda s: s["page_index"]):
+        img_path = _SESSIONS / f"{session_id}_imgs" / f"page_{student['page_index']}.jpg"
+        if not img_path.exists():
+            continue
+
+        img  = Image.open(img_path).convert("RGB")
+        iw, ih = img.size
+        draw = ImageDraw.Draw(img)
+
+        sx = iw / orig_w if orig_w > 0 else 1.0
+        sy = ih / orig_h if orig_h > 0 else 1.0
+
+        results = student.get("results", {})
+        RED = (210, 30, 30)
+
+        for q_str, bbox in bboxes.items():
+            r     = results.get(str(q_str), {})
+            judge = r.get("judge", "")
+            if judge not in ("correct", "wrong"):
+                continue
+
+            x0 = int(bbox[0] * sx)
+            y0 = int(bbox[1] * sy)
+            x1 = int(bbox[2] * sx)
+            y1 = int(bbox[3] * sy)
+
+            cell_h = max(y1 - y0, 1)
+            mark_s = max(int(cell_h * 0.75), 14)
+            lw     = max(2, mark_s // 10)
+            gap    = max(4, int(cell_h * 0.1))
+
+            mx1 = x0 - gap
+            mx0 = mx1 - mark_s
+            if mx0 < 2:          # 左端に入らない場合は右側へ
+                mx0 = x1 + gap
+                mx1 = mx0 + mark_s
+
+            myc = (y0 + y1) // 2
+            my0 = myc - mark_s // 2
+            my1 = myc + mark_s // 2
+
+            if judge == "correct":
+                draw.ellipse([(mx0, my0), (mx1, my1)], outline=RED, width=lw)
+            else:
+                pad = max(2, mark_s // 8)
+                draw.line([(mx0 + pad, my0 + pad), (mx1 - pad, my1 - pad)], fill=RED, width=lw)
+                draw.line([(mx1 - pad, my0 + pad), (mx0 + pad, my1 - pad)], fill=RED, width=lw)
+
+        # 右上に合計点
+        score     = student.get("score", 0)
+        max_score = student.get("max_score", 0)
+        txt   = f"{score} / {max_score}"
+        fsize = max(24, int(iw * 0.036))
+        font  = _get_draw_font(fsize)
+
+        try:
+            tb = draw.textbbox((0, 0), txt, font=font)
+            tw, th = tb[2] - tb[0], tb[3] - tb[1]
+        except AttributeError:
+            tw, th = draw.textsize(txt, font=font)  # Pillow < 8 fallback
+
+        margin  = max(10, int(iw * 0.015))
+        tx = iw - tw - margin
+        ty = margin
+        pb = max(6, fsize // 6)
+        draw.rectangle(
+            [(tx - pb, ty - pb), (tx + tw + pb, ty + th + pb)],
+            fill=(255, 255, 255), outline=RED, width=max(2, lw),
+        )
+        draw.text((tx, ty), txt, fill=RED, font=font)
+
+        output_images.append(img)
+
+    if not output_images:
+        raise HTTPException(status_code=404, detail="答案画像が見つかりません。先に採点を実行してください。")
+
+    buf = io.BytesIO()
+    output_images[0].save(
+        buf, format="PDF", save_all=True,
+        append_images=output_images[1:],
+        resolution=200,
+    )
+    buf.seek(0)
+
+    filename = f"scored_{session_id[:8]}.pdf"
+    return StreamingResponse(
+        buf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
