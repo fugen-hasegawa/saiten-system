@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import json
 import re
-import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -108,7 +107,7 @@ def detect_student_no_region(
 
 def build_answer_key(
     pdf_path: str | Path,
-    tmp_dir: str | Path,
+    tmp_dir: str | Path | None = None,  # 後方互換（使用しない）
     valid_choices: list[str] | None = None,
 ) -> dict:
     """
@@ -125,7 +124,11 @@ def build_answer_key(
     correction_map = cfg.get("ocr_correction_map", {})
     digits = cfg.get("student_no", {}).get("digits", 2)
 
-    pages = run_yomitoku(pdf_path, tmp_dir, lite=True, device="cpu", combine=True, viz=True)
+    pages = run_yomitoku(
+        pdf_path,
+        device="cpu",
+        save_first_page_to=_PAGE_IMAGE_PATH,
+    )
     all_tables = parse_tables(pages)
 
     if not all_tables:
@@ -171,15 +174,9 @@ def build_answer_key(
 
     num_questions = len(answers)
 
-    # ページ画像を保存し実サイズを取得
-    tmp_dir_path = Path(tmp_dir)
-    layout_imgs = sorted(tmp_dir_path.glob("*layout*.jpg"))
-    if not layout_imgs:
-        layout_imgs = sorted(tmp_dir_path.glob("*.jpg"))
+    # ページ画像の実サイズを取得（run_yomitoku が save_first_page_to に保存済み）
     page_image_size = {"w": page_w, "h": page_h}
-    if layout_imgs:
-        _PAGE_IMAGE_PATH.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy(layout_imgs[0], _PAGE_IMAGE_PATH)
+    if _PAGE_IMAGE_PATH.exists():
         try:
             from PIL import Image as _PILImage
             with _PILImage.open(_PAGE_IMAGE_PATH) as _img:

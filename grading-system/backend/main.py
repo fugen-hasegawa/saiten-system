@@ -5,7 +5,6 @@ import csv
 import io
 import json
 import shutil
-import tempfile
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -46,16 +45,14 @@ def index():
 async def post_answer_key(file: UploadFile = File(...)):
     suffix = Path(file.filename or "upload").suffix or ".pdf"
     tmp_pdf = _UPLOADS / f"{uuid.uuid4().hex}{suffix}"
-    tmp_out = Path(tempfile.mkdtemp(prefix="yomi_"))
 
     try:
         tmp_pdf.write_bytes(await file.read())
-        answer_key = build_answer_key(tmp_pdf, tmp_out)
+        answer_key = build_answer_key(tmp_pdf)
         save_answer_key(answer_key)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     finally:
-        shutil.rmtree(tmp_out, ignore_errors=True)
         tmp_pdf.unlink(missing_ok=True)
 
     review_count = sum(1 for v in answer_key.get("review", {}).values() if v)
@@ -140,17 +137,15 @@ async def post_grade(file: UploadFile = File(...)):
 
     suffix = Path(file.filename or "upload").suffix or ".pdf"
     tmp_pdf = _UPLOADS / f"{uuid.uuid4().hex}{suffix}"
-    tmp_out = Path(tempfile.mkdtemp(prefix="grade_"))
 
     try:
         tmp_pdf.write_bytes(await file.read())
 
         from .ocr import run_yomitoku
-        pages = run_yomitoku(tmp_pdf, tmp_out, lite=True, device="cpu", combine=True)
+        pages = run_yomitoku(tmp_pdf, device="cpu")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"OCR エラー: {e}")
     finally:
-        shutil.rmtree(tmp_out, ignore_errors=True)
         tmp_pdf.unlink(missing_ok=True)
 
     cfg = _load_config()
