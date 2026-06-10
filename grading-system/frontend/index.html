@@ -81,8 +81,9 @@
     .page-preview-inner svg {
       position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none;
     }
-    /* Tab② のオーバーレイは pointer-events: all で上書き */
+    /* Tab①②のオーバーレイは pointer-events: all で上書き */
     #gradePreviewInner svg { pointer-events: all; }
+    #pagePreviewInner svg  { pointer-events: all; }
 
     /* ─── 採点グリッド（Phase 3）─────────────────── */
     #tab-review .card { overflow: hidden; }
@@ -313,6 +314,12 @@
   </div>
 </div>
 
+<!-- オーバーレイ編集ポップアップ（Tab① 正解用） -->
+<div id="akOverlayEditor">
+  <div class="oe-label" id="akOverlayQLabel"></div>
+  <select id="akOverlaySelect"></select>
+</div>
+
 <!-- オーバーレイ編集ポップアップ（Tab② 採点用） -->
 <div id="gradeOverlayEditor">
   <div class="oe-label" id="gradeOverlayQLabel"></div>
@@ -442,18 +449,21 @@ function renderPageOverlay(ak) {
     const [x0, y0, x1, y1] = bbox;
     const val   = answers[q] || '';
     const color = _overlayColor(val, review[q]);
-    const cx = (x0 + x1) / 2;
-    const cy = (y0 + y1) / 2;
-    const bh = y1 - y0;
-    const fontSize = Math.max(10, Math.min(bh * 0.55, 28));
+    const cy    = (y0 + y1) / 2;
+    const bh    = y1 - y0;
+    const bw    = x1 - x0;
+    const fontSize  = Math.max(10, Math.min(bh * 0.55, 28));
     const labelSize = Math.max(8, fontSize * 0.5);
+    const pad       = Math.max(3, bw * 0.06);  // 左寄せ余白
 
     const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
     g.id = `ovl-q${q}`;
+    g.style.cursor = 'pointer';
+    g.addEventListener('click', e => openAkOverlayEditor(q, e));
 
     const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
     rect.setAttribute('x', x0); rect.setAttribute('y', y0);
-    rect.setAttribute('width', x1 - x0); rect.setAttribute('height', y1 - y0);
+    rect.setAttribute('width', bw); rect.setAttribute('height', bh);
     rect.setAttribute('fill', color + '33');
     rect.setAttribute('stroke', color);
     rect.setAttribute('stroke-width', '2');
@@ -461,8 +471,8 @@ function renderPageOverlay(ak) {
     g.appendChild(rect);
 
     const tq = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-    tq.setAttribute('x', cx); tq.setAttribute('y', y0 + labelSize);
-    tq.setAttribute('text-anchor', 'middle');
+    tq.setAttribute('x', x0 + pad); tq.setAttribute('y', y0 + labelSize);
+    tq.setAttribute('text-anchor', 'start');
     tq.setAttribute('font-size', labelSize);
     tq.setAttribute('fill', color);
     tq.setAttribute('font-family', 'sans-serif');
@@ -471,8 +481,8 @@ function renderPageOverlay(ak) {
 
     const tv = document.createElementNS('http://www.w3.org/2000/svg', 'text');
     tv.id = `ovl-val-q${q}`;
-    tv.setAttribute('x', cx); tv.setAttribute('y', cy + fontSize * 0.38);
-    tv.setAttribute('text-anchor', 'middle');
+    tv.setAttribute('x', x0 + pad); tv.setAttribute('y', cy + fontSize * 0.38);
+    tv.setAttribute('text-anchor', 'start');
     tv.setAttribute('font-size', fontSize);
     tv.setAttribute('font-weight', 'bold');
     tv.setAttribute('fill', color);
@@ -493,6 +503,88 @@ function updateOverlayCell(q, val, isReview) {
   if (rect) { rect.setAttribute('fill', color + '33'); rect.setAttribute('stroke', color); }
   g.querySelectorAll('text').forEach(t => t.setAttribute('fill', color));
   tv.textContent = val || '?';
+}
+
+// ─── Tab① オーバーレイ編集 ──────────────────────────────────────────────
+let _akOverlayQ = null;
+
+function openAkOverlayEditor(q, event) {
+  event.stopPropagation();
+  _akOverlayQ = q;
+
+  const editor = document.getElementById('akOverlayEditor');
+  const sel    = document.getElementById('akOverlaySelect');
+  document.getElementById('akOverlayQLabel').textContent = `問 ${q} を修正`;
+
+  const currentVal = gradeAk?.answers?.[q] || '';
+  sel.innerHTML = '';
+  ['', ...VALID_CHOICES].forEach(ch => {
+    const opt = document.createElement('option');
+    opt.value = ch; opt.textContent = ch || '（空）';
+    if (ch === currentVal) opt.selected = true;
+    sel.appendChild(opt);
+  });
+
+  const W = window.innerWidth, H = window.innerHeight;
+  let left = event.clientX + 8;
+  let top  = event.clientY + 8;
+  if (left + 150 > W) left = event.clientX - 158;
+  if (top  + 90  > H) top  = event.clientY - 98;
+  editor.style.left = left + 'px';
+  editor.style.top  = top  + 'px';
+  editor.style.display = 'block';
+
+  sel.focus();
+  sel.onchange = () => applyAkOverlayEdit();
+  setTimeout(() => {
+    document.addEventListener('click', _closeAkEditorOnClickOutside, { once: true });
+  }, 0);
+}
+
+function _closeAkEditorOnClickOutside(e) {
+  const editor = document.getElementById('akOverlayEditor');
+  if (!editor.contains(e.target)) editor.style.display = 'none';
+}
+
+async function applyAkOverlayEdit() {
+  const editor = document.getElementById('akOverlayEditor');
+  const val    = document.getElementById('akOverlaySelect').value;
+  editor.style.display = 'none';
+
+  const q = _akOverlayQ;
+  if (!q) return;
+
+  try {
+    const res = await fetch('/api/answer-key/cell', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ q, value: val }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail);
+
+    // キャッシュ更新
+    if (gradeAk) {
+      gradeAk.answers[q] = val;
+      gradeAk.review[q]  = !val || !VALID_CHOICES.includes(val);
+    }
+
+    // SVGオーバーレイ更新
+    const isReview = !val || !VALID_CHOICES.includes(val);
+    updateOverlayCell(q, val, isReview);
+
+    // テキストグリッド（answerGrid）も同期
+    const gridSel = document.querySelector(`#answerGrid select[data-q="${q}"]`);
+    if (gridSel) {
+      gridSel.value = val;
+      const cell = gridSel.closest('.answer-cell');
+      if (cell) cell.classList.toggle('review', isReview);
+    }
+
+    setStatus(document.getElementById('editStatus'), `問${q} を「${val || '（空）'}」に保存しました。`, 'success');
+  } catch(e) {
+    setStatus(document.getElementById('editStatus'), `エラー: ${e.message}`, 'error');
+  }
 }
 
 async function saveAkEdits() {
@@ -628,7 +720,6 @@ function renderStudentOverlay(student) {
     const r      = results[q] || {};
     const color  = judgeColor(r.judge || 'review');
     const val    = r.read || '';
-    const cx     = (x0 + x1) / 2;
     const cy     = (y0 + y1) / 2;
     const bh     = y1 - y0;
     const fontSize  = Math.max(10, Math.min(bh * 0.55, 28));
@@ -648,9 +739,11 @@ function renderStudentOverlay(student) {
     rect.setAttribute('rx', '2');
     g.appendChild(rect);
 
+    const pad = Math.max(3, (x1 - x0) * 0.06);
+
     const tq = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-    tq.setAttribute('x', cx); tq.setAttribute('y', y0 + labelSize);
-    tq.setAttribute('text-anchor', 'middle');
+    tq.setAttribute('x', x0 + pad); tq.setAttribute('y', y0 + labelSize);
+    tq.setAttribute('text-anchor', 'start');
     tq.setAttribute('font-size', labelSize);
     tq.setAttribute('fill', color);
     tq.setAttribute('font-family', 'sans-serif');
@@ -659,8 +752,8 @@ function renderStudentOverlay(student) {
 
     const tv = document.createElementNS('http://www.w3.org/2000/svg', 'text');
     tv.id = `gov-val-q${q}`;
-    tv.setAttribute('x', cx); tv.setAttribute('y', cy + fontSize * 0.38);
-    tv.setAttribute('text-anchor', 'middle');
+    tv.setAttribute('x', x0 + pad); tv.setAttribute('y', cy + fontSize * 0.38);
+    tv.setAttribute('text-anchor', 'start');
     tv.setAttribute('font-size', fontSize);
     tv.setAttribute('font-weight', 'bold');
     tv.setAttribute('fill', color);
