@@ -16,6 +16,8 @@
     "P": "ア",  "p": "ア",
     "T": "イ",  "t": "ウ",
     "H": "エ",  "h": "エ",
+    "木": "エ",
+    "ヤ": "ア",
     "大": null,
     "O": null,  "S": null,
     "R": null,  "B": null,  "C": null,  "D": null,  "F": null,
@@ -30,5 +32,13 @@
   },
   "student_no": {
     "digits": 2
+  },
+  "ocr_min_score": 0.40,
+  "ocr_device": "auto",
+  "ocr_cell_reocr": true,
+  "ocr_preprocess": {
+    "contrast":  1.4,
+    "sharpness": 2.0,
+    "denoise":   true
   }
 }

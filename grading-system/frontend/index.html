@@ -90,28 +90,33 @@
       position: sticky; top: 0; z-index: 10; white-space: nowrap;
       border-right: 1px solid #3d5166; text-align: center;
     }
-    #gradeGrid thead th:first-child,
-    #gradeGrid thead th:nth-child(2) {
-      position: sticky; z-index: 20; left: 0;
-    }
-    #gradeGrid thead th:nth-child(2) { left: 70px; }
 
     #gradeGrid tbody tr:nth-child(even) { background: #f9f9f9; }
     #gradeGrid tbody tr:hover > td { filter: brightness(0.96); }
 
     #gradeGrid td { padding: 5px 6px; border-right: 1px solid #eee; border-bottom: 1px solid #eee; text-align: center; white-space: nowrap; }
 
-    /* 固定列 */
-    #gradeGrid td.col-sno,
-    #gradeGrid td.col-name,
-    #gradeGrid td.col-score {
-      background: inherit; position: sticky; z-index: 5;
+    /* 固定列 th（上下・左右どちらにも sticky） */
+    #gradeGrid th.col-class, #gradeGrid th.col-sno, #gradeGrid th.col-name {
+      position: sticky; top: 0; z-index: 20; background: #2c3e50;
     }
-    #gradeGrid td.col-sno  { left: 0; min-width: 68px; }
-    #gradeGrid td.col-name { left: 70px; min-width: 90px; border-right: 2px solid #ccc; }
+    /* 固定列 td（横スクロール固定）— 透けないよう実色を指定 */
+    #gradeGrid td.col-class, #gradeGrid td.col-sno, #gradeGrid td.col-name,
+    #gradeGrid td.col-score {
+      position: sticky; z-index: 5; background: #fff;
+    }
+    #gradeGrid tbody tr:nth-child(even) td.col-class,
+    #gradeGrid tbody tr:nth-child(even) td.col-sno,
+    #gradeGrid tbody tr:nth-child(even) td.col-name,
+    #gradeGrid tbody tr:nth-child(even) td.col-score { background: #f9f9f9; }
+
+    #gradeGrid td.col-class, #gradeGrid th.col-class { left: 0; min-width: 40px; }
+    #gradeGrid td.col-sno,   #gradeGrid th.col-sno   { min-width: 60px; }
+    #gradeGrid td.col-name,  #gradeGrid th.col-name  { min-width: 90px; border-right: 2px solid #ccc; }
     #gradeGrid td.col-score { right: 0; min-width: 58px; border-left: 2px solid #ccc; font-weight: bold; }
 
-    /* 出席番号 review 強調 */
+    /* review 強調 */
+    #gradeGrid td.col-class.class-review { background: #fdebd0 !important; color: #935116; }
     #gradeGrid td.col-sno.sno-review { background: #fdebd0 !important; color: #935116; }
 
     /* セル色分け */
@@ -124,6 +129,15 @@
     .answer-cell-inner { cursor: pointer; min-width: 28px; display: inline-block; }
     .answer-cell-inner:hover { opacity: .75; }
     .cell-select { width: 52px; font-size: 12px; border: none; background: transparent; cursor: pointer; }
+
+    /* 読取位置設定 */
+    .svg-draw-mode { cursor: crosshair !important; user-select: none; }
+    .region-editor { margin-top: 16px; padding-top: 12px; border-top: 1px solid #eee; }
+    .region-editor h3 { font-size: 14px; font-weight: bold; margin-bottom: 6px; color: #444; }
+    .region-editor p  { font-size: 12px; color: #888; margin-bottom: 10px; }
+    .draw-btn-class { border-color: #3498db !important; color: #3498db !important; }
+    .draw-btn-sno   { border-color: #9b59b6 !important; color: #9b59b6 !important; }
+    .draw-btn-class.active, .draw-btn-sno.active { font-weight: bold; }
 
     /* 凡例 */
     .legend { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
@@ -216,6 +230,21 @@
       </div>
     </div>
     <div id="akPageStatus" style="margin-top:8px"></div>
+
+    <!-- 組・番号 読取位置設定 -->
+    <div class="region-editor" id="akRegionEditor">
+      <h3>組・番号の読取位置</h3>
+      <p>PDF 上をドラッグして「組」と「番号」の記入欄を囲み、「保存」してください。<br>
+         点線枠が現在の読取範囲です。採点時にこの座標が使用されます。</p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+        <button class="btn draw-btn-class" id="drawClassBtn" onclick="startDraw('class_no')">■ 組の範囲を設定</button>
+        <button class="btn draw-btn-sno"   id="drawSnoBtn"   onclick="startDraw('student_no')">■ 番号の範囲を設定</button>
+        <button class="btn btn-primary" onclick="saveRegions()" style="font-size:13px;">保存</button>
+        <button class="btn" id="drawCancelBtn" onclick="cancelDraw()" style="display:none;color:#e74c3c;border-color:#e74c3c;">キャンセル</button>
+      </div>
+      <div id="drawModeLabel" style="font-size:12px;color:#e67e22;margin-top:6px;display:none;"></div>
+      <div id="akRegionStatus" style="margin-top:6px;"></div>
+    </div>
   </div>
 </div>
 
@@ -293,8 +322,8 @@
   <div class="card">
     <h2>採点済み PDF 出力</h2>
     <p style="font-size:13px;margin-bottom:12px;">各生徒の答案に ○（正解）/ ×（不正解）を書き込み、右上に合計点を付けた PDF をダウンロードします。</p>
-    <div id="exportSessionInfo" style="font-size:13px;color:#666;margin-bottom:12px;"></div>
     <button class="btn btn-success" id="scoredPdfBtn" onclick="downloadScoredPdf()">採点済み PDF ダウンロード</button>
+    <div id="exportSessionInfo" style="font-size:13px;color:#bbb;margin-top:12px;"></div>
     <div id="scoredPdfStatus" style="margin-top:8px"></div>
   </div>
   <div class="card">
@@ -303,8 +332,8 @@
     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
       <label style="font-size:13px;">エンコーディング:
         <select id="csvEncoding">
+          <option value="shift_jis" selected>Shift-JIS（Excel対応）</option>
           <option value="utf-8-sig">UTF-8 (BOM付 / Excel対応)</option>
-          <option value="shift_jis">Shift-JIS</option>
         </select>
       </label>
       <button class="btn btn-primary" onclick="downloadCsv()">CSV ダウンロード</button>
@@ -382,6 +411,8 @@ async function renderAkGrid() {
   _renderAkSummaryBar(ak);
   document.getElementById('akPageCard').style.display = 'block';
   renderPageOverlay(ak);
+  renderRegionOverlays(ak);
+  initSvgDraw();
 }
 
 function _renderAkSummaryBar(ak) {
@@ -390,6 +421,166 @@ function _renderAkSummaryBar(ak) {
   document.getElementById('akSummaryBar').innerHTML =
     `<span>問題数: <strong>${ak.num_questions}</strong></span>` +
     `<span>要確認: <span class="review-count${rc === 0 ? ' zero' : ''}">${rc} セル</span></span>`;
+}
+
+// ─── 組・番号 読取位置設定（Tab①）──────────────────────────────────────
+let _drawMode    = null;   // null | 'class_no' | 'student_no'
+let _drawStart   = null;
+let _svgDrawInited = false;
+let _currentBboxNorm = { class_no: null, student_no: null };
+
+function initSvgDraw() {
+  if (_svgDrawInited) return;
+  _svgDrawInited = true;
+  const svg = document.getElementById('pagePreviewSvg');
+
+  svg.addEventListener('mousedown', e => {
+    if (!_drawMode) return;
+    e.preventDefault();
+    _drawStart = _getSvgPt(svg, e);
+  });
+
+  svg.addEventListener('mousemove', e => {
+    if (!_drawMode || !_drawStart) return;
+    const cur = _getSvgPt(svg, e);
+    let pr = document.getElementById('draw-preview-rect');
+    if (!pr) {
+      pr = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+      pr.id = 'draw-preview-rect';
+      pr.setAttribute('stroke-width', '2');
+      pr.setAttribute('stroke-dasharray', '6 3');
+      svg.appendChild(pr);
+    }
+    const color = _drawMode === 'class_no' ? '#3498db' : '#9b59b6';
+    pr.setAttribute('stroke', color);
+    pr.setAttribute('fill', color + '22');
+    pr.setAttribute('x', Math.min(_drawStart.x, cur.x));
+    pr.setAttribute('y', Math.min(_drawStart.y, cur.y));
+    pr.setAttribute('width',  Math.abs(cur.x - _drawStart.x));
+    pr.setAttribute('height', Math.abs(cur.y - _drawStart.y));
+  });
+
+  svg.addEventListener('mouseup', e => {
+    if (!_drawMode || !_drawStart) return;
+    const cur = _getSvgPt(svg, e);
+    const vb  = svg.viewBox.baseVal;
+    const pw  = vb.width, ph = vb.height;
+    const x0  = Math.max(0,  Math.min(_drawStart.x, cur.x));
+    const y0  = Math.max(0,  Math.min(_drawStart.y, cur.y));
+    const x1  = Math.min(pw, Math.max(_drawStart.x, cur.x));
+    const y1  = Math.min(ph, Math.max(_drawStart.y, cur.y));
+    if ((x1 - x0) < 5 || (y1 - y0) < 5) { cancelDraw(); return; } // 小さすぎる選択は無視
+    const bn = [x0/pw, y0/ph, x1/pw, y1/ph].map(v => Math.round(v * 1000) / 1000);
+    _currentBboxNorm[_drawMode] = bn;
+    updateRegionRect(_drawMode, bn, pw, ph);
+    document.getElementById('draw-preview-rect')?.remove();
+    cancelDraw();
+  });
+}
+
+function _getSvgPt(svg, e) {
+  const pt = svg.createSVGPoint();
+  pt.x = e.clientX; pt.y = e.clientY;
+  return pt.matrixTransform(svg.getScreenCTM().inverse());
+}
+
+function startDraw(field) {
+  _drawMode  = field;
+  _drawStart = null;
+  const svg  = document.getElementById('pagePreviewSvg');
+  svg.classList.add('svg-draw-mode');
+  const label = field === 'class_no' ? '組' : '番号';
+  const lbl   = document.getElementById('drawModeLabel');
+  lbl.textContent = `PDF 上をドラッグして「${label}」の記入欄を囲んでください`;
+  lbl.style.display = 'block';
+  document.getElementById('drawCancelBtn').style.display = 'inline-block';
+  document.getElementById('drawClassBtn').classList.toggle('active', field === 'class_no');
+  document.getElementById('drawSnoBtn').classList.toggle('active', field === 'student_no');
+}
+
+function cancelDraw() {
+  _drawMode  = null;
+  _drawStart = null;
+  document.getElementById('pagePreviewSvg').classList.remove('svg-draw-mode');
+  document.getElementById('drawModeLabel').style.display = 'none';
+  document.getElementById('drawCancelBtn').style.display = 'none';
+  document.getElementById('drawClassBtn').classList.remove('active');
+  document.getElementById('drawSnoBtn').classList.remove('active');
+}
+
+function renderRegionOverlays(ak) {
+  const size = ak.page_image_size;
+  if (!size) return;
+  const tpl = ak.template || {};
+  ['class_no', 'student_no'].forEach(field => {
+    const cfg = tpl[field];
+    if (!cfg?.bbox_norm) return;
+    _currentBboxNorm[field] = cfg.bbox_norm;
+    updateRegionRect(field, cfg.bbox_norm, size.w, size.h);
+  });
+}
+
+function updateRegionRect(field, bbox_norm, pw, ph) {
+  const svg = document.getElementById('pagePreviewSvg');
+  document.getElementById(`region-rect-${field}`)?.remove();
+
+  const color = field === 'class_no' ? '#3498db' : '#9b59b6';
+  const label = field === 'class_no' ? '組' : '番号';
+  const [nx0, ny0, nx1, ny1] = bbox_norm;
+  const x0 = nx0 * pw, y0 = ny0 * ph;
+  const w  = (nx1 - nx0) * pw, h = (ny1 - ny0) * ph;
+
+  const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+  g.id = `region-rect-${field}`;
+
+  const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+  rect.setAttribute('x', x0); rect.setAttribute('y', y0);
+  rect.setAttribute('width', w); rect.setAttribute('height', h);
+  rect.setAttribute('fill', color + '33');
+  rect.setAttribute('stroke', color);
+  rect.setAttribute('stroke-width', '3');
+  rect.setAttribute('stroke-dasharray', '8 4');
+  rect.setAttribute('rx', '3');
+  g.appendChild(rect);
+
+  const t = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+  t.setAttribute('x', x0 + 4);
+  t.setAttribute('y', Math.max(y0 - 3, 12));
+  t.setAttribute('font-size', '13');
+  t.setAttribute('fill', color);
+  t.setAttribute('font-weight', 'bold');
+  t.setAttribute('font-family', 'sans-serif');
+  t.textContent = label;
+  g.appendChild(t);
+
+  svg.appendChild(g);
+}
+
+async function saveRegions() {
+  const body = {};
+  if (_currentBboxNorm.class_no)   body.class_no   = { bbox_norm: _currentBboxNorm.class_no };
+  if (_currentBboxNorm.student_no) body.student_no  = { bbox_norm: _currentBboxNorm.student_no };
+
+  const statusEl = document.getElementById('akRegionStatus');
+  if (!Object.keys(body).length) {
+    setStatus(statusEl, '範囲が指定されていません', 'info');
+    return;
+  }
+  try {
+    const res = await fetch('/api/answer-key/template', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error((await res.json()).detail);
+    setStatus(statusEl, '✓ 保存しました。次回の採点からこの座標が使用されます。', 'success');
+    if (gradeAk?.template) {
+      if (body.class_no)   Object.assign(gradeAk.template.class_no   ??= {}, { method: 'bbox', bbox_norm: body.class_no.bbox_norm });
+      if (body.student_no) Object.assign(gradeAk.template.student_no ??= {}, { method: 'bbox', bbox_norm: body.student_no.bbox_norm });
+    }
+  } catch(e) {
+    setStatus(statusEl, `エラー: ${e.message}`, 'error');
+  }
 }
 
 // ─── 解答用紙プレビュー（Tab①）─────────────────────────────────────────
@@ -632,9 +823,13 @@ async function renderGradePageView(session, pageIndex) {
 }
 
 function _renderStudentBar(student) {
-  const snoReview = student.student_no_status === 'review';
-  const snoText   = student.student_no || '—';
+  const classReview = student.class_no_status === 'review';
+  const snoReview   = student.student_no_status === 'review';
+  const classText   = student.class_no || '—';
+  const snoText     = student.student_no || '—';
   document.getElementById('gradeStudentBar').innerHTML =
+    `組: <span class="class-edit" onclick="editGradeClassNo(${student.page_index})" ` +
+    `title="クリックで編集" style="${classReview ? 'color:#c0392b' : ''}">${classText}</span>　` +
     `出席番号: <span class="sno-edit" onclick="editGradeStudentNo(${student.page_index})" ` +
     `title="クリックで編集" style="${snoReview ? 'color:#c0392b' : ''}">${snoText}</span>` +
     `　氏名: ${student.name || '—'}` +
@@ -648,6 +843,58 @@ function gradeNav(delta) {
   if (next >= 0 && next < pages.length) {
     renderGradePageView(currentSession, pages[next]);
   }
+}
+
+function editGradeClassNo(pageIndex) {
+  const student = (currentSession?.students || []).find(s => s.page_index === pageIndex);
+  if (!student) return;
+
+  const bar       = document.getElementById('gradeStudentBar');
+  const classSpan = bar.querySelector('.class-edit');
+  if (!classSpan || classSpan.querySelector('input')) return;
+
+  const original = student.class_no || '';
+  const inp = document.createElement('input');
+  inp.type = 'text'; inp.value = original;
+  inp.style.cssText = 'width:36px;font-size:13px;border:1px solid #aaa;padding:2px 4px;border-radius:3px;';
+  classSpan.textContent = '';
+  classSpan.appendChild(inp);
+  inp.focus(); inp.select();
+
+  const apply = async () => {
+    const val = inp.value.trim();
+    try {
+      const res = await fetch(`/api/session/${currentSessionId}/class-no`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ page_index: pageIndex, value: val }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail);
+      student.class_no = val;
+      student.class_no_status = val ? 'ok' : 'review';
+      if (data.name !== undefined) student.name = data.name;
+      _renderStudentBar(student);
+      const tr = document.querySelector(`#gradeGrid tr[data-page-index="${pageIndex}"]`);
+      if (tr) {
+        const classTd = tr.querySelector('.col-class');
+        if (classTd) {
+          classTd.textContent = val || '—';
+          classTd.className = 'col-class' + (val ? '' : ' class-review');
+        }
+        const nameTd = document.getElementById(`name-${pageIndex}`);
+        if (nameTd) nameTd.textContent = data.name || student.name || '—';
+      }
+    } catch(e) {
+      inp.remove(); classSpan.textContent = original || '—';
+      setStatus(document.getElementById('gradePageStatus'), `エラー: ${e.message}`, 'error');
+    }
+  };
+  inp.addEventListener('blur', apply);
+  inp.addEventListener('keydown', e => {
+    if (e.key === 'Enter')  inp.blur();
+    if (e.key === 'Escape') { inp.remove(); classSpan.textContent = original || '—'; }
+  });
 }
 
 // ─── 答案オーバーレイ描画（Tab②）────────────────────────────────────────
@@ -896,8 +1143,9 @@ function renderGrid(data) {
 
   const thead = document.createElement('thead');
   const hr = document.createElement('tr');
-  addTh(hr, '出席番号');
-  addTh(hr, '氏名');
+  addTh(hr, '組',  'col-class');
+  addTh(hr, '番号', 'col-sno');
+  addTh(hr, '氏名', 'col-name');
   qnos.forEach(q => addTh(hr, `Q${q}`));
   addTh(hr, '合計');
   thead.appendChild(hr); table.appendChild(thead);
@@ -905,17 +1153,39 @@ function renderGrid(data) {
   const tbody = document.createElement('tbody');
   students.forEach(s => tbody.appendChild(buildStudentRow(s, qnos)));
   table.appendChild(tbody);
+  requestAnimationFrame(fixStickyColumns);
 }
 
-function addTh(tr, text) {
+function fixStickyColumns() {
+  const firstRow = document.querySelector('#gradeGrid tbody tr');
+  if (!firstRow) return;
+  const classTd = firstRow.querySelector('.col-class');
+  const snoTd   = firstRow.querySelector('.col-sno');
+  if (!classTd || !snoTd) return;
+  const classW = classTd.offsetWidth;
+  const snoW   = snoTd.offsetWidth;
+  document.querySelectorAll('#gradeGrid .col-sno').forEach(el => el.style.left = classW + 'px');
+  document.querySelectorAll('#gradeGrid .col-name').forEach(el => el.style.left = (classW + snoW) + 'px');
+}
+
+function addTh(tr, text, cls) {
   const th = document.createElement('th');
   th.textContent = text;
+  if (cls) th.className = cls;
   tr.appendChild(th);
 }
 
 function buildStudentRow(student, qnos) {
   const tr = document.createElement('tr');
   tr.dataset.pageIndex = student.page_index;
+
+  const classTd = document.createElement('td');
+  classTd.className = 'col-class' + (student.class_no_status === 'review' ? ' class-review' : '');
+  classTd.textContent = student.class_no || '—';
+  classTd.title = 'クリックで編集';
+  classTd.style.cursor = 'pointer';
+  classTd.onclick = () => editClassNo(student, classTd, tr);
+  tr.appendChild(classTd);
 
   const snoTd = document.createElement('td');
   snoTd.className = 'col-sno' + (student.student_no_status === 'review' ? ' sno-review' : '');
@@ -1002,6 +1272,46 @@ function editCell(student, q, td, span, tr) {
   };
   sel.addEventListener('change', apply);
   sel.addEventListener('blur',   apply);
+}
+
+// ─── 組番号編集（Tab③）──────────────────────────────────────────────────
+function editClassNo(student, td, tr) {
+  if (td.querySelector('input')) return;
+  const original = student.class_no || '';
+  td.textContent = '';
+
+  const inp = document.createElement('input');
+  inp.type = 'text'; inp.value = original;
+  inp.style.cssText = 'width:36px;font-size:12px;border:1px solid #aaa;padding:2px;';
+  td.appendChild(inp);
+  inp.focus(); inp.select();
+
+  const apply = async () => {
+    const val = inp.value.trim();
+    inp.remove();
+    try {
+      const res = await fetch(`/api/session/${currentSessionId}/class-no`, {
+        method: 'PATCH',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({page_index: student.page_index, value: val}),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail);
+      student.class_no = val;
+      student.class_no_status = val ? 'ok' : 'review';
+      if (data.name !== undefined) student.name = data.name;
+      td.textContent = val || '—';
+      td.className = 'col-class' + (student.class_no_status === 'review' ? ' class-review' : '');
+      const nameTd = document.getElementById(`name-${student.page_index}`);
+      if (nameTd) nameTd.textContent = student.name || '—';
+      if (gradeCurrentPage === student.page_index) _renderStudentBar(student);
+    } catch(e) {
+      td.textContent = original || '—';
+      setStatus(document.getElementById('reviewStatus'), `エラー: ${e.message}`, 'error');
+    }
+  };
+  inp.addEventListener('blur',  apply);
+  inp.addEventListener('keydown', e => { if (e.key === 'Enter') inp.blur(); if (e.key === 'Escape') { inp.remove(); td.textContent = original || '—'; } });
 }
 
 // ─── 出席番号編集（Tab③）────────────────────────────────────────────────

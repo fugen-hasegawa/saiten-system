@@ -217,6 +217,21 @@ def read_student_no(page_data: dict, sno_template: dict) -> tuple[str, str]:
     return _read_student_no_bbox(page_data, bbox_norm, digits)
 
 
+def read_class_no(page_data: dict, class_template: dict) -> tuple[str, str]:
+    """テンプレートに従って組番号を読む。"""
+    method = class_template.get("method", "bbox")
+    digits = class_template.get("digits", 1)
+
+    if method == "label_cell":
+        label = class_template.get("label", "組")
+        val, status = _read_student_no_label(page_data, label, digits)
+        if status == "ok":
+            return val, status
+
+    bbox_norm = class_template.get("bbox_norm", [0.40, 0.84, 0.65, 0.93])
+    return _read_student_no_bbox(page_data, bbox_norm, digits)
+
+
 # ─── 1ページ読取 ───────────────────────────────────────────────────────────────
 
 def read_student_sheet(
@@ -262,9 +277,18 @@ def read_student_sheet(
     sno_template = template.get("student_no", {})
     student_no, sno_status = read_student_no(page_data, sno_template)
 
+    # 組番号読取
+    class_template = template.get("class_no")
+    if class_template:
+        class_no, class_no_status = read_class_no(page_data, class_template)
+    else:
+        class_no, class_no_status = "", "review"
+
     return {
         "student_no": student_no,
         "student_no_status": sno_status,
+        "class_no": class_no,
+        "class_no_status": class_no_status,
         "answers": answers,
     }
 

@@ -20,7 +20,7 @@ from .grading import (
     read_student_sheet,
     score_student,
 )
-from .roster import _DATA_PATH as _ROSTER_PATH, load_roster, save_roster
+from .roster import _DATA_PATH as _ROSTER_PATH, load_roster, roster_get, save_roster
 
 _ROOT = Path(__file__).parent.parent
 _FRONTEND = _ROOT / "frontend"
@@ -81,6 +81,28 @@ def get_answer_key_image():
     return FileResponse(str(img_path), media_type="image/jpeg")
 
 
+@app.patch("/api/answer-key/template")
+async def patch_answer_key_template(body: dict):
+    """template の class_no / student_no の bbox_norm を手動更新する。"""
+    data = load_answer_key()
+    if data is None:
+        raise HTTPException(status_code=404, detail="正解データが未登録です。")
+
+    template = data.setdefault("template", {})
+    for field in ("class_no", "student_no"):
+        if field not in body:
+            continue
+        bn = body[field].get("bbox_norm")
+        if not bn or len(bn) != 4:
+            continue
+        existing = template.setdefault(field, {})
+        existing["bbox_norm"] = bn
+        existing["method"] = "bbox"   # 手動設定は常に bbox として扱う
+
+    save_answer_key(data)
+    return {"ok": True}
+
+
 @app.patch("/api/answer-key/cell")
 async def patch_answer_key_cell(body: dict):
     data = load_answer_key()
@@ -108,13 +130,17 @@ async def post_roster(file: UploadFile = File(...)):
         roster = load_roster(_ROSTER_PATH)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    return {"count": len(roster)}
+    return {"count": len(roster["data"])}
 
 
 @app.get("/api/roster")
 def get_roster():
     roster = load_roster()
-    return JSONResponse(roster)
+    records = [
+        {"class_no": c if c else None, "student_no": s, "name": n}
+        for (c, s), n in sorted(roster["data"].items())
+    ]
+    return JSONResponse({"has_class": roster["has_class"], "records": records})
 
 
 # ─── 採点 ────────────────────────────────────────────────────────────────────
@@ -168,10 +194,12 @@ async def post_grade(file: UploadFile = File(...)):
         score, max_score = score_student(results, points)
 
         sno = sheet["student_no"]
-        name = roster.get(sno, "") if sno else ""
+        name = roster_get(roster, sheet.get("class_no", ""), sno)
 
         students.append({
             "page_index": page_idx,
+            "class_no": sheet.get("class_no", ""),
+            "class_no_status": sheet.get("class_no_status", "review"),
             "student_no": sno,
             "student_no_status": sheet["student_no_status"],
             "name": name,
@@ -263,6 +291,25 @@ async def patch_session_cell(session_id: str, body: dict):
     return {"ok": True, "score": score, "max_score": max_score, "result": student["results"][q]}
 
 
+@app.patch("/api/session/{session_id}/class-no")
+async def patch_class_no(session_id: str, body: dict):
+    """組番号を修正する。"""
+    session = _load_session(session_id)
+    page_index = int(body.get("page_index", 0))
+    value = str(body.get("value", ""))
+
+    student = next((s for s in session["students"] if s["page_index"] == page_index), None)
+    if student is None:
+        raise HTTPException(status_code=400, detail="page_index が見つかりません。")
+
+    roster = load_roster()
+    student["class_no"] = value
+    student["class_no_status"] = "ok" if value else "review"
+    student["name"] = roster_get(roster, value, student.get("student_no", ""))
+    _save_session(session)
+    return {"ok": True, "name": student["name"]}
+
+
 @app.patch("/api/session/{session_id}/student-no")
 async def patch_student_no(session_id: str, body: dict):
     """出席番号を修正し名簿と再突合する。"""
@@ -277,7 +324,7 @@ async def patch_student_no(session_id: str, body: dict):
     roster = load_roster()
     student["student_no"] = value
     student["student_no_status"] = "ok" if value else "review"
-    student["name"] = roster.get(value, "")
+    student["name"] = roster_get(roster, student.get("class_no", ""), value)
     _save_session(session)
     return {"ok": True, "name": student["name"]}
 
@@ -311,16 +358,17 @@ def get_session_csv(
     qnos = sorted(students[0]["results"].keys(), key=lambda x: int(x))
 
     def judge_symbol(judge: str) -> str:
-        return {"correct": "○", "wrong": "×", "blank": "-", "review": "?"}.get(judge, "?")
+        return "○" if judge == "correct" else "×"
 
     buf = io.StringIO()
     writer = csv.writer(buf)
 
-    header = ["出席番号", "氏名"] + [f"Q{q}" for q in qnos] + ["合計点"]
+    header = ["組", "出席番号", "氏名"] + [f"Q{q}" for q in qnos] + ["合計点"]
     writer.writerow(header)
 
     for s in sorted(students, key=lambda x: x["page_index"]):
         row = [
+            s.get("class_no", ""),
             s.get("student_no", ""),
             s.get("name", ""),
         ]

@@ -103,6 +103,53 @@ def detect_student_no_region(
     }
 
 
+def detect_class_region(
+    pages: list[dict],
+    page_w: int,
+    page_h: int,
+    digits: int = 1,
+) -> dict:
+    """
+    yomitoku JSON ページリストから組番号の読取方式テンプレを返す。
+
+    優先度:
+    1. words 内に「組」ラベルがあれば label_cell 方式
+    2. なければ bbox 既定値（出席番号欄の左側エリア）
+    """
+    for page in pages:
+        for word in page.get("words", []):
+            content = word.get("content", "").strip()
+            if content in ("組", "くみ"):
+                pts = word["points"]
+                xs = [p[0] for p in pts]
+                ys = [p[1] for p in pts]
+                wx0, wy0, wx1, wy1 = min(xs), min(ys), max(xs), max(ys)
+                margin = (wx1 - wx0) * 0.3
+                nbx0 = (wx1 + margin) / page_w
+                nby0 = wy0 / page_h
+                nbx1 = min((wx1 + (wx1 - wx0) * 3) / page_w, 1.0)
+                nby1 = wy1 / page_h
+                return {
+                    "method": "label_cell",
+                    "label": "組",
+                    "neighbor_offset": {"d_row": 0, "d_col": 1},
+                    "bbox_norm": [
+                        round(nbx0, 3), round(nby0, 3),
+                        round(nbx1, 3), round(nby1, 3),
+                    ],
+                    "digits": digits,
+                }
+
+    # フォールバック: 出席番号欄の左側エリアの既定 bbox
+    return {
+        "method": "bbox",
+        "label": None,
+        "neighbor_offset": {"d_row": 0, "d_col": 1},
+        "bbox_norm": [0.40, 0.84, 0.65, 0.93],
+        "digits": digits,
+    }
+
+
 # ─── 正解キー生成 ──────────────────────────────────────────────────────────
 
 def build_answer_key(
@@ -186,6 +233,7 @@ def build_answer_key(
 
     page_size_hint = {"w": page_w, "h": page_h}
     student_no_template = detect_student_no_region(pages, page_w, page_h, digits)
+    class_no_template = detect_class_region(pages, page_w, page_h, digits=1)
 
     answer_key = {
         "version": 1,
@@ -195,6 +243,7 @@ def build_answer_key(
         "template": {
             "page_size_hint": page_size_hint,
             "student_no": student_no_template,
+            "class_no": class_no_template,
             "answer_table": {
                 "qno_is_printed": True,
                 "answer_offset": answer_offset,

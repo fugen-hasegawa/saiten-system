@@ -12,17 +12,42 @@ _analyzer = None
 _analyzer_lock = threading.Lock()
 
 
-def _get_analyzer(device: str = "cpu"):
+def _resolve_device(device: str = "auto") -> str:
+    """
+    使用デバイスを解決する。
+
+    "auto": MPS → CPU の順で自動選択
+    "mps" / "cpu": 指定通り
+    config.json の ocr_device が "auto" 以外なら config を優先する。
+    """
+    import json
+    cfg_path = Path(__file__).parent / "config.json"
+    try:
+        with open(cfg_path, encoding="utf-8") as f:
+            cfg_device = json.load(f).get("ocr_device", "auto")
+    except Exception:
+        cfg_device = "auto"
+
+    target = cfg_device if cfg_device != "auto" else device
+    if target == "auto":
+        import torch
+        if torch.backends.mps.is_available():
+            return "mps"
+        return "cpu"
+    return target
+
+
+def _get_analyzer(device: str = "auto"):
     global _analyzer
     if _analyzer is None:
         with _analyzer_lock:
             if _analyzer is None:
                 from yomitoku import DocumentAnalyzer
-                # configs={} でデフォルト（フルモデル: parseq-large-v4.1）を使用
-                # --lite の parseq-tiny より大幅に精度向上
+                resolved = _resolve_device(device)
+                print(f"[OCR] device: {resolved}")
                 _analyzer = DocumentAnalyzer(
                     configs={},
-                    device=device,
+                    device=resolved,
                     visualize=False,
                 )
     return _analyzer
@@ -80,17 +105,45 @@ def _schema_to_dict(schema) -> dict:
 
 # ─── ページ画像保存（answer_key プレビュー用）────────────────────────────────
 
+def _load_preprocess_cfg() -> dict:
+    """config.json の ocr_preprocess を読む。"""
+    import json
+    cfg_path = Path(__file__).parent / "config.json"
+    try:
+        with open(cfg_path, encoding="utf-8") as f:
+            return json.load(f).get("ocr_preprocess", {})
+    except Exception:
+        return {}
+
+
 def _enhance_for_ocr(page_img):
     """
-    BGR numpy 画像のコントラスト・シャープネスを強化して OCR 精度を上げる。
-    CLAHE は使わない（表の罫線・矢印をノイズとして増幅するリスクがある）。
+    BGR numpy 画像を前処理して OCR 精度を上げる。
+    パラメータは config.json の ocr_preprocess で調整可能。
+
+    処理順:
+      1. ノイズ除去（denoise=true のとき MedianFilter）
+      2. コントラスト強化
+      3. シャープネス強化
+    CLAHE は罫線ノイズ増幅リスクがあるため不採用。
     """
-    import numpy as np
-    from PIL import Image as _PILImage, ImageEnhance
+    from PIL import Image as _PILImage, ImageEnhance, ImageFilter
+
+    cfg      = _load_preprocess_cfg()
+    contrast  = float(cfg.get("contrast",  1.4))
+    sharpness = float(cfg.get("sharpness", 2.0))
+    denoise   = bool(cfg.get("denoise",    True))
 
     pil = _PILImage.fromarray(page_img[:, :, ::-1])  # BGR → RGB
-    pil = ImageEnhance.Contrast(pil).enhance(1.2)
-    pil = ImageEnhance.Sharpness(pil).enhance(1.5)
+
+    if denoise:
+        # MedianFilter(3): 孤立ノイズを除去しつつ文字エッジを保持
+        pil = pil.filter(ImageFilter.MedianFilter(size=3))
+
+    pil = ImageEnhance.Contrast(pil).enhance(contrast)
+    pil = ImageEnhance.Sharpness(pil).enhance(sharpness)
+
+    import numpy as np
     return np.array(pil)[:, :, ::-1]
 
 
@@ -112,7 +165,7 @@ def save_page_image(page_img, dest_path: str | Path) -> tuple[int, int]:
 def run_yomitoku(
     input_path: str | Path,
     out_dir: str | Path | None = None,  # 後方互換（使用しない）
-    device: str = "cpu",
+    device: str = "auto",
     save_first_page_to: str | Path | None = None,
     save_pages_to_dir: str | Path | None = None,
     # 後方互換パラメータ（無視）
@@ -154,7 +207,9 @@ def run_yomitoku(
             first = False
             enhanced = _enhance_for_ocr(page_img)
             schema, _, _ = analyzer(enhanced)
-            result.append(_schema_to_dict(schema))
+            page_dict = _schema_to_dict(schema)
+            _reocr_empty_cells(page_dict, enhanced, analyzer)
+            result.append(page_dict)
 
     # DocumentAnalyzer.__call__ が asyncio.run() を使うため別スレッドで起動
     t = threading.Thread(target=_process)
@@ -164,6 +219,84 @@ def run_yomitoku(
     if not result:
         raise RuntimeError("OCR 処理結果が空です。")
     return result
+
+
+# ─── セル個別再OCR ────────────────────────────────────────────────────────────
+
+def _cell_reocr_enabled() -> bool:
+    import json
+    cfg_path = Path(__file__).parent / "config.json"
+    try:
+        with open(cfg_path, encoding="utf-8") as f:
+            return bool(json.load(f).get("ocr_cell_reocr", True))
+    except Exception:
+        return True
+
+
+def _reocr_empty_cells(page_dict: dict, page_img_bgr, analyzer) -> None:
+    """
+    全ページOCR後も空のテーブルセルを個別クロップして再OCRで補完する。
+
+    処理:
+      1. セル bbox を切り出してパディング追加
+      2. 短辺が 80px 未満なら拡大（最大4倍）
+      3. 前処理 → analyzer で認識
+      4. 最高スコアのワードを採用（スコア 0.25 以上）
+    """
+    if not _cell_reocr_enabled():
+        return
+
+    from PIL import Image as _PILImage
+    import numpy as np
+
+    ih, iw = page_img_bgr.shape[:2]
+    pil_page = _PILImage.fromarray(page_img_bgr[:, :, ::-1])  # BGR→RGB
+
+    reocr_count = 0
+    filled_count = 0
+
+    for table in page_dict.get("tables", []):
+        for cell in table.get("cells", []):
+            if cell["contents"].strip():
+                continue  # すでに認識済みはスキップ
+
+            b = cell["box"]
+            x0, y0, x1, y1 = int(b[0]), int(b[1]), int(b[2]), int(b[3])
+            if x1 - x0 < 8 or y1 - y0 < 8:
+                continue
+
+            pad = 5
+            crop = pil_page.crop((
+                max(0, x0 - pad), max(0, y0 - pad),
+                min(iw, x1 + pad), min(ih, y1 + pad),
+            ))
+
+            # 短辺が 80px 未満なら拡大（最大4倍）
+            cw, ch = crop.width, crop.height
+            scale = max(1, min(4, 80 // max(1, min(cw, ch))))
+            if scale > 1:
+                crop = crop.resize((cw * scale, ch * scale), _PILImage.LANCZOS)
+
+            arr = np.array(crop)[:, :, ::-1]  # RGB→BGR
+            arr = _enhance_for_ocr(arr)
+
+            reocr_count += 1
+            try:
+                sub_schema, _, _ = analyzer(arr)
+                best_text, best_score = "", 0.0
+                for w in sub_schema.words:
+                    t = (w.content or "").strip()
+                    s = float(w.rec_score)
+                    if t and s > best_score:
+                        best_text, best_score = t, s
+                if best_text and best_score >= 0.25:
+                    cell["contents"] = best_text
+                    filled_count += 1
+            except Exception:
+                pass
+
+    if reocr_count:
+        print(f"[OCR] cell re-OCR: {reocr_count} 空セル → {filled_count} 補完")
 
 
 # ─── bbox ヘルパ ─────────────────────────────────────────────────────────────
@@ -195,7 +328,15 @@ def _overlap_y_ratio(cell_bbox: list, wb: list) -> float:
 
 # ─── 表セルへの文字割り当て ───────────────────────────────────────────────
 
-_MIN_SINGLE_CHAR_SCORE = 0.10  # フルモデルは精度が高いのでやや緩くする
+def _get_min_score() -> float:
+    """config.json の ocr_min_score を読む（デフォルト 0.40）。"""
+    import json
+    cfg_path = Path(__file__).parent / "config.json"
+    try:
+        with open(cfg_path, encoding="utf-8") as f:
+            return float(json.load(f).get("ocr_min_score", 0.40))
+    except Exception:
+        return 0.40
 
 
 def _assign_words_to_cells(cells: list[Cell], words: list[dict]) -> None:
@@ -260,9 +401,10 @@ def _assign_words_to_cells(cells: list[Cell], words: list[dict]) -> None:
             _apply_word(word, empty_only=False)
 
     # Pass 2: 単文字ワードを残った空セルに（低スコアは除外）
+    min_score = _get_min_score()
     for word in words:
         content = word.get("content", "").strip()
-        if len(content) <= 1 and word.get("rec_score", 0.0) >= _MIN_SINGLE_CHAR_SCORE:
+        if len(content) <= 1 and word.get("rec_score", 0.0) >= min_score:
             _apply_word(word, empty_only=True)
 
 
